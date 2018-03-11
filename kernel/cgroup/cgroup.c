@@ -6481,8 +6481,10 @@ void cgroup_sk_free(struct sock_cgroup_data *skcd)
 
 	if (skcd->no_refcnt)
 		return;
-	cgroup_bpf_put(cgrp);
-	cgroup_put(cgrp);
+	if (cgrp) {
+		cgroup_bpf_put(cgrp);
+		cgroup_put(cgrp);
+	}
 }
 
 #endif	/* CONFIG_SOCK_CGROUP_DATA */
