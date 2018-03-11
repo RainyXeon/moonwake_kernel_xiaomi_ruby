@@ -1053,6 +1053,8 @@ int __cgroup_bpf_run_filter_skb(struct sock *sk,
 		return 0;
 
 	cgrp = sock_cgroup_ptr(&sk->sk_cgrp_data);
+	if (!cgrp)
+		return 0;
 	save_sk = skb->sk;
 	skb->sk = sk;
 	__skb_push(skb, offset);
@@ -1094,6 +1096,9 @@ int __cgroup_bpf_run_filter_sk(struct sock *sk,
 {
 	struct cgroup *cgrp = sock_cgroup_ptr(&sk->sk_cgrp_data);
 	int ret;
+
+	if (!cgrp)
+		return 0;
 
 	ret = BPF_PROG_RUN_ARRAY(cgrp->bpf.effective[type], sk, BPF_PROG_RUN);
 	return ret == 1 ? 0 : -EPERM;
@@ -1139,6 +1144,8 @@ int __cgroup_bpf_run_filter_sock_addr(struct sock *sk,
 	}
 
 	cgrp = sock_cgroup_ptr(&sk->sk_cgrp_data);
+	if (!cgrp)
+		return 0;
 	ret = BPF_PROG_RUN_ARRAY(cgrp->bpf.effective[type], &ctx, BPF_PROG_RUN);
 
 	return ret == 1 ? 0 : -EPERM;
@@ -1167,6 +1174,9 @@ int __cgroup_bpf_run_filter_sock_ops(struct sock *sk,
 {
 	struct cgroup *cgrp = sock_cgroup_ptr(&sk->sk_cgrp_data);
 	int ret;
+
+	if (!cgrp)
+		return 0;
 
 	ret = BPF_PROG_RUN_ARRAY(cgrp->bpf.effective[type], sock_ops,
 				 BPF_PROG_RUN);
@@ -1392,7 +1402,7 @@ int __cgroup_bpf_run_filter_setsockopt(struct sock *sk, int *level,
 	 * attached to the hook so we don't waste time allocating
 	 * memory and locking the socket.
 	 */
-	if (!cgroup_bpf_enabled ||
+	if (!cgrp || !cgroup_bpf_enabled ||
 	    __cgroup_bpf_prog_array_is_empty(cgrp, BPF_CGROUP_SETSOCKOPT))
 		return 0;
 
@@ -1471,7 +1481,7 @@ int __cgroup_bpf_run_filter_getsockopt(struct sock *sk, int level,
 	 * attached to the hook so we don't waste time allocating
 	 * memory and locking the socket.
 	 */
-	if (!cgroup_bpf_enabled ||
+	if (!cgrp || !cgroup_bpf_enabled ||
 	    __cgroup_bpf_prog_array_is_empty(cgrp, BPF_CGROUP_GETSOCKOPT))
 		return retval;
 
