@@ -257,7 +257,7 @@ bool mm_has_blockable_invalidate_notifiers(struct mm_struct *mm)
 	int id;
 	bool ret = false;
 
-	WARN_ON_ONCE(!rwsem_is_locked(&mm->mmap_sem));
+	mmap_assert_locked(mm);
 
 	if (!mm_has_notifiers(mm))
 		return ret;
