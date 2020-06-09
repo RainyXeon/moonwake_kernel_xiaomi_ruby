@@ -13,7 +13,7 @@
 #include <linux/audit.h>
 #include <linux/scs.h>
 
-#include <asm/pgtable.h>
+#include <linux/pgtable.h>
 #include <linux/uaccess.h>
 
 static struct signal_struct init_signals = {
