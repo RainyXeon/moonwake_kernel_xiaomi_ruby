@@ -92,7 +92,7 @@
 #include <linux/livepatch.h>
 #include <linux/thread_info.h>
 
-#include <asm/pgtable.h>
+#include <linux/pgtable.h>
 #include <asm/pgalloc.h>
 #include <linux/uaccess.h>
 #include <asm/mmu_context.h>
