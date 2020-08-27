@@ -1477,6 +1477,7 @@ config BPF_SYSCALL
 	select ANON_INODES
 	select BPF
 	select IRQ_WORK
+	select TASKS_TRACE_RCU
 	default n
 	help
 	  Enable the bpf() system call that allows to manipulate eBPF
