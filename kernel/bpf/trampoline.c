@@ -9,6 +9,7 @@
 #include <linux/btf.h>
 #include <linux/rcupdate_trace.h>
 #include <linux/rcupdate_wait.h>
+#include <trace/hooks/memory.h>
 
 /* dummy _ops. The verifier will operate on target program's ops. */
 const struct bpf_verifier_ops bpf_extension_verifier_ops = {
@@ -38,6 +39,7 @@ void *bpf_jit_alloc_exec_page(void)
 	 * everytime new program is attached or detached.
 	 */
 	set_memory_x((long)image, 1);
+	trace_android_vh_set_memory_x((unsigned long)image, 1);
 	return image;
 }
 
@@ -365,6 +367,7 @@ void bpf_trampoline_put(struct bpf_trampoline *tr)
 	if (!refcount_dec_and_test(&tr->refcnt))
 		goto out;
 	WARN_ON_ONCE(mutex_is_locked(&tr->mutex));
+
 	for (i = 0; i < BPF_TRAMP_MAX; i++)
 		if (WARN_ON_ONCE(!hlist_empty(&tr->progs_hlist[i])))
 			goto out;
@@ -377,6 +380,7 @@ void bpf_trampoline_put(struct bpf_trampoline *tr)
 	 * may not have had any sleepable programs and we need to wait
 	 * for tasks to get out of trampoline code before freeing it.
 	 */
+	trace_android_vh_set_memory_nx((unsigned long)tr->image, 1);
 	synchronize_rcu_tasks();
 	bpf_jit_free_exec(tr->image);
 	hlist_del(&tr->hlist);
