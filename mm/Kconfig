@@ -813,6 +813,13 @@ config SPECULATIVE_PAGE_FAULT
        depends on ARCH_HAS_PTE_SPECIAL && MMU && SMP
        help
          Try to handle user space page faults without holding the mmap_sem.
+
+config LRU_GEN_ENABLED
+	bool "Enable by default"
+	depends on LRU_GEN
+	help
+	  This option enables the multi-gen LRU by default.
+
 config LRU_GEN_STATS
 	bool "Full stats for debugging"
 	depends on LRU_GEN
