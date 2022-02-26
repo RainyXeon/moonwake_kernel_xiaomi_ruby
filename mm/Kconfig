@@ -813,6 +813,12 @@ config SPECULATIVE_PAGE_FAULT
        depends on ARCH_HAS_PTE_SPECIAL && MMU && SMP
        help
          Try to handle user space page faults without holding the mmap_sem.
+config LRU_GEN_STATS
+	bool "Full stats for debugging"
+	depends on LRU_GEN
+	help
+	  Do not enable this option unless you plan to look at historical stats
+	  from evicted generations for debugging purpose.
 
 	 This should allow better concurrency for massively threaded process
 	 since the page fault handler will not wait for other threads memory
