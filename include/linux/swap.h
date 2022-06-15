@@ -352,6 +352,7 @@ extern void deactivate_file_page(struct page *page);
 extern void mark_page_lazyfree(struct page *page);
 extern void swap_setup(void);
 
+<<<<<<< HEAD
 extern void __lru_cache_add_active_or_unevictable(struct page *page,
 						unsigned long vma_flags);
 
@@ -361,6 +362,8 @@ static inline void lru_cache_add_active_or_unevictable(struct page *page,
 	return __lru_cache_add_active_or_unevictable(page, vma->vm_flags);
 }
 
+=======
+>>>>>>> 14e19fff8cd2 (mm: mglru: Fix mis-merge for 4.19)
 /* linux/mm/vmscan.c */
 extern unsigned long zone_reclaimable_pages(struct zone *zone);
 extern unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
