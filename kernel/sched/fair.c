@@ -6751,11 +6751,6 @@ int select_max_spare_capacity(struct task_struct *p, int target)
 			continue;
 #endif
 
-#ifdef CONFIG_SCHED_WALT
-		if (walt_cpu_high_irqload(cpu))
-			continue;
-#endif
-
 		if (idle_cpu(cpu))
 			return cpu;
 
@@ -7698,7 +7693,8 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu, int sy
 			int cur_cpu_cap = capacity_orig_of(cpu);
 
 			if (cur_cpu_cap > best_cpu_cap){
-				if((best_energy - cur_energy) > max(1, (best_energy >> 4))) {
+				if((best_energy - cur_energy) >
+					max_t(unsigned long, 1, (best_energy >> 4))) {
 					best_energy = cur_energy;
 					best_energy_cpu = cpu;
 				}

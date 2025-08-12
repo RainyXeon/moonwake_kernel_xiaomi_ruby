@@ -640,26 +640,13 @@ int v4l2_m2m_streamoff(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
 }
 EXPORT_SYMBOL_GPL(v4l2_m2m_streamoff);
 
-__poll_t v4l2_m2m_poll(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
-			   struct poll_table_struct *wait)
+static __poll_t v4l2_m2m_poll_for_data(struct file *file,
+				       struct v4l2_m2m_ctx *m2m_ctx,
+				       struct poll_table_struct *wait)
 {
-	struct video_device *vfd = video_devdata(file);
-	__poll_t req_events = poll_requested_events(wait);
 	struct vb2_queue *src_q, *dst_q;
-	struct vb2_buffer *src_vb = NULL, *dst_vb = NULL;
 	__poll_t rc = 0;
 	unsigned long flags;
-
-	if (test_bit(V4L2_FL_USES_V4L2_FH, &vfd->flags)) {
-		struct v4l2_fh *fh = file->private_data;
-
-		if (v4l2_event_pending(fh))
-			rc = EPOLLPRI;
-		else if (req_events & EPOLLPRI)
-			poll_wait(file, &fh->wait, wait);
-		if (!(req_events & (EPOLLOUT | EPOLLWRNORM | EPOLLIN | EPOLLRDNORM)))
-			return rc;
-	}
 
 	src_q = v4l2_m2m_get_src_vq(m2m_ctx);
 	dst_q = v4l2_m2m_get_dst_vq(m2m_ctx);
@@ -669,51 +656,59 @@ __poll_t v4l2_m2m_poll(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
 	 * means either in driver already or waiting for driver to claim it
 	 * and start processing.
 	 */
-	if ((!src_q->streaming || list_empty(&src_q->queued_list))
-		&& (!dst_q->streaming || list_empty(&dst_q->queued_list))) {
-		rc |= EPOLLERR;
-		goto end;
-	}
-
-	spin_lock_irqsave(&src_q->done_lock, flags);
-	if (list_empty(&src_q->done_list))
-		poll_wait(file, &src_q->done_wq, wait);
-	spin_unlock_irqrestore(&src_q->done_lock, flags);
-
-	spin_lock_irqsave(&dst_q->done_lock, flags);
-	if (list_empty(&dst_q->done_list)) {
-		/*
-		 * If the last buffer was dequeued from the capture queue,
-		 * return immediately. DQBUF will return -EPIPE.
-		 */
-		if (dst_q->last_buffer_dequeued) {
-			spin_unlock_irqrestore(&dst_q->done_lock, flags);
-			return rc | EPOLLIN | EPOLLRDNORM;
-		}
-
-		poll_wait(file, &dst_q->done_wq, wait);
-	}
-	spin_unlock_irqrestore(&dst_q->done_lock, flags);
+	if ((!src_q->streaming || src_q->error ||
+	     list_empty(&src_q->queued_list)) &&
+	    (!dst_q->streaming || dst_q->error ||
+	     (list_empty(&dst_q->queued_list) && !dst_q->last_buffer_dequeued)))
+		return EPOLLERR;
 
 	spin_lock_irqsave(&src_q->done_lock, flags);
 	if (!list_empty(&src_q->done_list))
-		src_vb = list_first_entry(&src_q->done_list, struct vb2_buffer,
-						done_entry);
-	if (src_vb && (src_vb->state == VB2_BUF_STATE_DONE
-			|| src_vb->state == VB2_BUF_STATE_ERROR))
 		rc |= EPOLLOUT | EPOLLWRNORM;
 	spin_unlock_irqrestore(&src_q->done_lock, flags);
 
 	spin_lock_irqsave(&dst_q->done_lock, flags);
-	if (!list_empty(&dst_q->done_list))
-		dst_vb = list_first_entry(&dst_q->done_list, struct vb2_buffer,
-						done_entry);
-	if (dst_vb && (dst_vb->state == VB2_BUF_STATE_DONE
-			|| dst_vb->state == VB2_BUF_STATE_ERROR))
+	/*
+	 * If the last buffer was dequeued from the capture queue, signal
+	 * userspace. DQBUF(CAPTURE) will return -EPIPE.
+	 */
+	if (!list_empty(&dst_q->done_list) || dst_q->last_buffer_dequeued)
 		rc |= EPOLLIN | EPOLLRDNORM;
 	spin_unlock_irqrestore(&dst_q->done_lock, flags);
 
-end:
+	return rc;
+}
+
+__poll_t v4l2_m2m_poll(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
+		       struct poll_table_struct *wait)
+{
+	struct video_device *vfd = video_devdata(file);
+	struct vb2_queue *src_q = v4l2_m2m_get_src_vq(m2m_ctx);
+	struct vb2_queue *dst_q = v4l2_m2m_get_dst_vq(m2m_ctx);
+	__poll_t req_events = poll_requested_events(wait);
+	__poll_t rc = 0;
+
+	/*
+	 * poll_wait() MUST be called on the first invocation on all the
+	 * potential queues of interest, even if we are not interested in their
+	 * events during this first call. Failure to do so will result in
+	 * queue's events to be ignored because the poll_table won't be capable
+	 * of adding new wait queues thereafter.
+	 */
+	poll_wait(file, &src_q->done_wq, wait);
+	poll_wait(file, &dst_q->done_wq, wait);
+
+	if (req_events & (EPOLLOUT | EPOLLWRNORM | EPOLLIN | EPOLLRDNORM))
+		rc = v4l2_m2m_poll_for_data(file, m2m_ctx, wait);
+
+	if (test_bit(V4L2_FL_USES_V4L2_FH, &vfd->flags)) {
+		struct v4l2_fh *fh = file->private_data;
+
+		poll_wait(file, &fh->wait, wait);
+		if (v4l2_event_pending(fh))
+			rc |= EPOLLPRI;
+	}
+
 	return rc;
 }
 EXPORT_SYMBOL_GPL(v4l2_m2m_poll);

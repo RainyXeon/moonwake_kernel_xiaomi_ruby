@@ -144,6 +144,8 @@ __acquires(ep->musb->lock)
 		unmap_dma_buffer(req, musb);
 
 	trace_musb_req_gb(req);
+	if (req->ep->end_point.address == 0)
+		usb_gadget_control_complete(&musb->g, &req->request);
 	usb_gadget_giveback_request(&req->ep->end_point, &req->request);
 	spin_lock(&musb->lock);
 	ep->busy = busy;

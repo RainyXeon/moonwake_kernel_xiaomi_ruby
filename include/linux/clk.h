@@ -751,8 +751,6 @@ static inline struct clk *devm_clk_get(struct device *dev, const char *id)
 	return NULL;
 }
 
-<<<<<<< HEAD
-=======
 static inline struct clk *devm_clk_get_prepared(struct device *dev,
 						const char *id)
 {
@@ -765,15 +763,12 @@ static inline struct clk *devm_clk_get_enabled(struct device *dev,
 	return NULL;
 }
 
->>>>>>> v4.19.325
 static inline struct clk *devm_clk_get_optional(struct device *dev,
 						const char *id)
 {
 	return NULL;
 }
 
-<<<<<<< HEAD
-=======
 static inline struct clk *devm_clk_get_optional_prepared(struct device *dev,
 							 const char *id)
 {
@@ -786,7 +781,6 @@ static inline struct clk *devm_clk_get_optional_enabled(struct device *dev,
 	return NULL;
 }
 
->>>>>>> v4.19.325
 static inline int __must_check devm_clk_bulk_get(struct device *dev, int num_clks,
 						 struct clk_bulk_data *clks)
 {

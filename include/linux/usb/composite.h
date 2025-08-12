@@ -48,6 +48,14 @@
  * are ready. The control transfer will then be kept from completing till
  * all the function drivers that requested for USB_GADGET_DELAYED_STAUS
  * invoke usb_composite_setup_continue().
+ *
+ * NOTE: USB_GADGET_DELAYED_STATUS must not be used in UDC drivers: they
+ * must delay completing the status stage for 0-length control transfers
+ * regardless of the whether USB_GADGET_DELAYED_STATUS is returned from
+ * the gadget driver's setup() callback.
+ * Currently, a number of UDC drivers rely on USB_GADGET_DELAYED_STATUS,
+ * which is a bug. These drivers must be fixed and USB_GADGET_DELAYED_STATUS
+ * must be contained within the composite framework.
  */
 #define USB_GADGET_DELAYED_STATUS       0x7fff	/* Impossibly large value */
 
@@ -263,6 +271,9 @@ int usb_interface_id(struct usb_configuration *, struct usb_function *);
 int usb_func_wakeup(struct usb_function *func);
 
 int usb_get_func_interface_id(struct usb_function *func);
+
+int config_ep_by_speed_and_alt(struct usb_gadget *g, struct usb_function *f,
+				struct usb_ep *_ep, u8 alt);
 
 int config_ep_by_speed_and_alt(struct usb_gadget *g, struct usb_function *f,
 				struct usb_ep *_ep, u8 alt);
@@ -540,6 +551,8 @@ extern struct usb_string *usb_gstrings_attach(struct usb_composite_dev *cdev,
 extern int usb_string_ids_n(struct usb_composite_dev *c, unsigned n);
 
 extern void composite_disconnect(struct usb_gadget *gadget);
+extern void composite_reset(struct usb_gadget *gadget);
+
 extern int composite_setup(struct usb_gadget *gadget,
 		const struct usb_ctrlrequest *ctrl);
 extern void composite_suspend(struct usb_gadget *gadget);

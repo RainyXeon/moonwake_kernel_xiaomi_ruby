@@ -458,6 +458,27 @@ stall:
 	return handled;
 }
 
+static int ep0_send_ack(struct musb *musb)
+{
+	void __iomem *regs = musb->control_ep->regs;
+	u16 csr;
+
+	if (musb->ep0_state == MUSB_EP0_STAGE_STATUSIN)
+		csr = MUSB_CSR0_P_DATAEND | MUSB_CSR0_P_SVDRXPKTRDY;
+	else if (musb->ep0_state == MUSB_EP0_STAGE_STATUSOUT)
+		csr = MUSB_CSR0_P_DATAEND | MUSB_CSR0_TXPKTRDY;
+	else
+		return -EINVAL;
+
+
+	musb_ep_select(musb->mregs, 0);
+	musb_writew(regs, MUSB_CSR0, csr);
+	// No stall happened, get rid of pending ACK flags because we just sent those out.
+	musb->ackpend = 0;
+
+	return 0;
+}
+
 /* we have an ep0out data packet
  * Context:  caller holds controller lock
  */
@@ -504,12 +525,10 @@ static void ep0_rxstate(struct musb *musb)
 	if (req) {
 		musb->ackpend = csr;
 		musb_g_ep0_giveback(musb, req);
-		if (!musb->ackpend)
-			return;
-		musb->ackpend = 0;
+	} else {
+		musb_ep_select(musb->mregs, 0);
+		musb_writew(regs, MUSB_CSR0, csr);
 	}
-	musb_ep_select(musb->mregs, 0);
-	musb_writew(regs, MUSB_CSR0, csr);
 }
 
 /*
@@ -551,22 +570,14 @@ static void ep0_txstate(struct musb *musb)
 	} else
 		request = NULL;
 
-	/* report completions as soon as the fifo's loaded; there's no
-	 * win in waiting till this last packet gets acked.  (other than
-	 * very precise fault reporting, needed by USB TMC; possible with
-	 * this hardware, but not usable from portable gadget drivers.)
-	 */
 	if (request) {
 		musb->ackpend = csr;
 		musb_g_ep0_giveback(musb, request);
-		if (!musb->ackpend)
-			return;
-		musb->ackpend = 0;
+	} else {
+		/* send it out, triggering a "txpktrdy cleared" irq */
+		musb_ep_select(musb->mregs, 0);
+		musb_writew(regs, MUSB_CSR0, csr);
 	}
-
-	/* send it out, triggering a "txpktrdy cleared" irq */
-	musb_ep_select(musb->mregs, 0);
-	musb_writew(regs, MUSB_CSR0, csr);
 }
 
 /*
@@ -937,6 +948,8 @@ musb_g_ep0_queue(struct usb_ep *e, struct usb_request *r, gfp_t gfp_flags)
 	case MUSB_EP0_STAGE_RX:		/* control-OUT data */
 	case MUSB_EP0_STAGE_TX:		/* control-IN data */
 	case MUSB_EP0_STAGE_ACKWAIT:	/* zero-length data */
+	case MUSB_EP0_STAGE_STATUSIN:
+	case MUSB_EP0_STAGE_STATUSOUT:
 		status = 0;
 		break;
 	default:
@@ -968,6 +981,24 @@ musb_g_ep0_queue(struct usb_ep *e, struct usb_request *r, gfp_t gfp_flags)
 			musb_writew(regs, MUSB_CSR0,
 					musb->ackpend | MUSB_CSR0_P_DATAEND);
 			musb->ackpend = 0;
+			musb_g_ep0_giveback(ep->musb, r);
+		}
+
+	/* status stage of OUT with data, issue IN status, then giveback */
+	} else if (musb->ep0_state == MUSB_EP0_STAGE_STATUSIN) {
+		if (req->request.length)
+			status = -EINVAL;
+		else {
+			status = ep0_send_ack(musb);
+			musb_g_ep0_giveback(ep->musb, r);
+		}
+
+	/* status stage of IN with data, issue OUT status, then giveback */
+	} else if (musb->ep0_state == MUSB_EP0_STAGE_STATUSOUT) {
+		if (req->request.length)
+			status = -EINVAL;
+		else {
+			status = ep0_send_ack(musb);
 			musb_g_ep0_giveback(ep->musb, r);
 		}
 

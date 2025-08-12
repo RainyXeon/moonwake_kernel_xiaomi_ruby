@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0+
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * u_serial.h - interface to USB gadget "serial port"/TTY utilities
  *
@@ -60,9 +60,5 @@ void gserial_free_line(unsigned char port_line);
 /* connect/disconnect is handled by individual functions */
 int gserial_connect(struct gserial *, u8 port_num);
 void gserial_disconnect(struct gserial *);
-
-/* functions are bound to configurations by a config or gadget driver */
-int gser_bind_config(struct usb_configuration *c, u8 port_num);
-int obex_bind_config(struct usb_configuration *c, u8 port_num);
 
 #endif /* __U_SERIAL_H */
