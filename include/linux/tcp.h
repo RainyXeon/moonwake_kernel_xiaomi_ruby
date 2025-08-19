@@ -241,7 +241,7 @@ struct tcp_sock {
 		recvmsg_inq : 1,/* Indicate # of bytes in queue upon recvmsg */
 		repair      : 1,
 		frto        : 1;/* F-RTO (RFC5682) activated in CA_Loss */
-		tlp_orig_data_app_limited:1; /* app-limited before TLP rtx? */
+	u8tlp_orig_data_app_limited:1; /* app-limited before TLP rtx? */
 	u8	repair_queue;
 	u8	syn_data:1,	/* SYN includes data */
 		syn_fastopen:1,	/* SYN includes Fast Open option */
