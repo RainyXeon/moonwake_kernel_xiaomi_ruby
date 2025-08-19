@@ -1284,6 +1284,8 @@ static struct ctl_table ipv4_net_table[] = {
 	{ }
 };
 
+#define IPV4_NET_TABLE_SIZE ARRAY_SIZE(ipv4_net_table)
+
 static __net_init int ipv4_sysctl_init_net(struct net *net)
 {
 	struct ctl_table *table;
@@ -1292,12 +1294,12 @@ static __net_init int ipv4_sysctl_init_net(struct net *net)
 	if (!net_eq(net, &init_net)) {
 		int i;
 
-		table = kmemdup(table, sizeof(ipv4_net_table), GFP_KERNEL);
+		table = kmemdup(table, sizeof(struct ctl_table) * IPV4_NET_TABLE_SIZE, GFP_KERNEL);
 		if (!table)
 			goto err_alloc;
 
 		/* Update the variables to point into the current struct net */
-		for (i = 0; i < ARRAY_SIZE(ipv4_net_table) - 1; i++)
+		for (i = 0; i < IPV4_NET_TABLE_SIZE - 1; i++)
 			table[i].data += (void *)net - (void *)&init_net;
 	}
 
