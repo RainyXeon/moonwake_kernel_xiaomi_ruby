@@ -60,7 +60,7 @@ struct ctl_table
 } __randomize_layout;
 
 /* shared constants to be used in various sysctls */
-extern const int sysctl_vals[];
+extern int sysctl_vals[];
 
 #define SYSCTL_ZERO	((void *)&sysctl_vals[0])
 #define SYSCTL_ONE	((void *)&sysctl_vals[1])
