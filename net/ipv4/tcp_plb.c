@@ -79,8 +79,6 @@ void tcp_plb_check_rehash(struct sock *sk, struct tcp_plb_state *plb)
 
 	sk_rethink_txhash(sk);
 	plb->consec_cong_rounds = 0;
-	tcp_sk(sk)->plb_rehash++;
-	NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPPLBREHASH);
 }
 EXPORT_SYMBOL_GPL(tcp_plb_check_rehash);
 
@@ -97,7 +95,7 @@ void tcp_plb_update_state_upon_rto(struct sock *sk, struct tcp_plb_state *plb)
 		return;
 
 	pause = READ_ONCE(net->ipv4.sysctl_tcp_plb_suspend_rto_sec) * HZ;
-	pause += get_random_u32_below(pause);
+	pause += prandom_u32_max(pause);
 	plb->pause_until = tcp_jiffies32 + pause;
 
 	/* Reset PLB state upon RTO, since an RTO causes a sk_rethink_txhash() call
