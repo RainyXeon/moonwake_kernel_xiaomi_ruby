@@ -237,11 +237,11 @@ struct tcp_sock {
 		is_sack_reneg:1,    /* in recovery from loss with SACK reneg? */
 		unused:2;
 	u8	nonagle     : 4,/* Disable Nagle algorithm?             */
-		tlp_orig_data_app_limited:1; /* app-limited before TLP rtx? */
 		thin_lto    : 1,/* Use linear timeouts for thin streams */
 		recvmsg_inq : 1,/* Indicate # of bytes in queue upon recvmsg */
 		repair      : 1,
 		frto        : 1;/* F-RTO (RFC5682) activated in CA_Loss */
+		tlp_orig_data_app_limited:1; /* app-limited before TLP rtx? */
 	u8	repair_queue;
 	u8	syn_data:1,	/* SYN includes data */
 		syn_fastopen:1,	/* SYN includes Fast Open option */
