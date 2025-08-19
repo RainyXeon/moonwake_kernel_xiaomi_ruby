@@ -42,6 +42,8 @@ struct ctl_table_poll {
 	wait_queue_head_t wait;
 };
 
+typedef int proc_handler (struct ctl_table *ctl, int write,
+			  void __user *buffer, size_t *lenp, loff_t *ppos);
 
 /* A sysctl table is an array of struct ctl_table: */
 struct ctl_table 
@@ -63,9 +65,6 @@ extern const int sysctl_vals[];
 #define SYSCTL_ZERO	((void *)&sysctl_vals[0])
 #define SYSCTL_ONE	((void *)&sysctl_vals[1])
 #define SYSCTL_INT_MAX	((void *)&sysctl_vals[2])
-
-typedef int proc_handler (struct ctl_table *ctl, int write,
-			  void __user *buffer, size_t *lenp, loff_t *ppos);
 
 extern int proc_dostring(struct ctl_table *, int,
 			 void __user *, size_t *, loff_t *);
