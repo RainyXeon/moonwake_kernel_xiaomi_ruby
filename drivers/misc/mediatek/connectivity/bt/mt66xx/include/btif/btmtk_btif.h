@@ -201,10 +201,6 @@ struct bt_dump_queue {
 #define BT_BTIF_DUMP_DMA		0x08
 #define BT_BTIF_DUMP_ALL		0x0F
 
-struct sched_param {
-	int sched_priority;
-};
-
 struct bt_dbg_st {
 	bool rt_thd_enable;
 	uint8_t rx_buf_ctrl;
