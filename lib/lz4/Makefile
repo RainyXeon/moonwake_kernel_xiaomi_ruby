@@ -10,5 +10,6 @@ obj-$(CONFIG_LZ4HC_COMPRESS) += lz4hc.o
 obj-$(CONFIG_ARM64) += lz4armv8/lz4accel.o
 obj-$(CONFIG_ARM64) += lz4armv8/lz4armv8.o
 
-# Force preprocess assembly for lz4armv8.s (SYM_FUNC_* macros need cpp)
-CFLAGS_lz4armv8/lz4armv8.o := -x assembler-with-cpp
+# Override default rule: preprocess lz4armv8.s using gcc (cpp enabled)
+$(obj)/lz4armv8/lz4armv8.o: $(src)/lz4armv8/lz4armv8.s
+	$(CC) $(c_flags) -x assembler-with-cpp -c $< -o $@
