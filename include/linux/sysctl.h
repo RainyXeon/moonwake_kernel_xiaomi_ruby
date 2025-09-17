@@ -31,14 +31,40 @@
 
 /* For the /proc/sys support */
 struct completion;
-struct ctl_table;
 struct nsproxy;
 struct ctl_table_root;
 struct ctl_table_header;
 struct ctl_dir;
 
+/* Support for userspace poll() to watch for changes */
+struct ctl_table_poll {
+	atomic_t event;
+	wait_queue_head_t wait;
+};
+
 typedef int proc_handler (struct ctl_table *ctl, int write,
 			  void __user *buffer, size_t *lenp, loff_t *ppos);
+
+/* A sysctl table is an array of struct ctl_table: */
+struct ctl_table 
+{
+	const char *procname;		/* Text ID for /proc/sys, or zero */
+	void *data;
+	int maxlen;
+	umode_t mode;
+	struct ctl_table *child;	/* Deprecated */
+	proc_handler *proc_handler;	/* Callback for text formatting */
+	struct ctl_table_poll *poll;
+	void *extra1;
+	void *extra2;
+} __randomize_layout;
+
+/* shared constants to be used in various sysctls */
+extern int sysctl_vals[];
+
+#define SYSCTL_ZERO	((void *)&sysctl_vals[0])
+#define SYSCTL_ONE	((void *)&sysctl_vals[1])
+#define SYSCTL_INT_MAX	((void *)&sysctl_vals[2])
 
 extern int proc_dostring(struct ctl_table *, int,
 			 void __user *, size_t *, loff_t *);
@@ -91,12 +117,6 @@ extern int proc_do_large_bitmap(struct ctl_table *, int,
  * cover common cases.
  */
 
-/* Support for userspace poll() to watch for changes */
-struct ctl_table_poll {
-	atomic_t event;
-	wait_queue_head_t wait;
-};
-
 static inline void *proc_sys_poll_event(struct ctl_table_poll *poll)
 {
 	return (void *)(unsigned long)atomic_read(&poll->event);
@@ -109,19 +129,6 @@ static inline void *proc_sys_poll_event(struct ctl_table_poll *poll)
 #define DEFINE_CTL_TABLE_POLL(name)					\
 	struct ctl_table_poll name = __CTL_TABLE_POLL_INITIALIZER(name)
 
-/* A sysctl table is an array of struct ctl_table: */
-struct ctl_table 
-{
-	const char *procname;		/* Text ID for /proc/sys, or zero */
-	void *data;
-	int maxlen;
-	umode_t mode;
-	struct ctl_table *child;	/* Deprecated */
-	proc_handler *proc_handler;	/* Callback for text formatting */
-	struct ctl_table_poll *poll;
-	void *extra1;
-	void *extra2;
-} __randomize_layout;
 
 struct ctl_node {
 	struct rb_node node;
