@@ -72,6 +72,8 @@ DummyBW(IMG_UINT32 ui32DispatchTableEntry,
         IMG_UINT8 *psBridgeOut,
         CONNECTION_DATA *psConnection);
 
+typedef PVRSRV_ERROR (*ServerResourceDestroyFunction)(IMG_HANDLE, IMG_HANDLE);
+
 typedef IMG_INT (*BridgeWrapperFunction)(IMG_UINT32 ui32DispatchTableEntry,
 									 IMG_UINT8 *psBridgeIn,
 									 IMG_UINT8 *psBridgeOut,
@@ -83,6 +85,10 @@ typedef struct _PVRSRV_BRIDGE_DISPATCH_TABLE_ENTRY
 	                                    arguments before calling into srvkm proper */
 	POS_LOCK hBridgeLock; /*!< The bridge lock which needs to be acquired
                                    before calling the above wrapper */
+
+	IMG_UINT32 ui32InBufferSize; /*!< The expected size of the in buffer given by the client */
+	IMG_UINT32 ui32OutBufferSize; /*!< The expected size of the out buffer given by the client */
+
 #if defined(DEBUG_BRIDGE_KM)
 	const IMG_CHAR *pszIOCName; /*!< Name of the ioctl: e.g. "PVRSRV_BRIDGE_CONNECT_SERVICES" */
 	const IMG_CHAR *pszFunctionName; /*!< Name of the wrapper function: e.g. "PVRSRVConnectBW" */
@@ -116,7 +122,9 @@ _SetDispatchTableEntry(IMG_UINT32 ui32BridgeGroup,
                        BridgeWrapperFunction pfFunction,
                        const IMG_CHAR *pszFunctionName,
                        POS_LOCK hBridgeLock,
-                       const IMG_CHAR* pszBridgeLockName);
+                       const IMG_CHAR* pszBridgeLockName,
+                       IMG_UINT32 ui32InBufferSize,
+                       IMG_UINT32 ui32OutBufferSize);
 void
 UnsetDispatchTableEntry(IMG_UINT32 ui32BridgeGroup,
                         IMG_UINT32 ui32Index);
@@ -124,9 +132,14 @@ UnsetDispatchTableEntry(IMG_UINT32 ui32BridgeGroup,
 
 /* PRQA S 0884,3410 2*/ /* macro relies on the lack of brackets */
 #define SetDispatchTableEntry(ui32BridgeGroup, ui32Index, pfFunction,\
-					hBridgeLock) \
-	_SetDispatchTableEntry(ui32BridgeGroup, ui32Index, #ui32Index, (BridgeWrapperFunction)pfFunction, #pfFunction,\
-							(POS_LOCK)hBridgeLock, #hBridgeLock)
+                              hBridgeLock, ui32InBufferSize, ui32OutBufferSize) \
+	do \
+	{ \
+		static_assert((ui32InBufferSize) <= PVRSRV_MAX_BRIDGE_IN_SIZE, "Bridge input buffer is too small for bridge function: " #pfFunction); \
+		static_assert((ui32OutBufferSize) <= PVRSRV_MAX_BRIDGE_OUT_SIZE, "Bridge output buffer is too small for bridge function: " #pfFunction); \
+		_SetDispatchTableEntry(ui32BridgeGroup, ui32Index, #ui32Index, (BridgeWrapperFunction)pfFunction, #pfFunction,\
+		                       (POS_LOCK)hBridgeLock, #hBridgeLock, ui32InBufferSize, ui32OutBufferSize); \
+	} while(0)
 
 #define DISPATCH_TABLE_GAP_THRESHOLD 5
 
@@ -208,6 +221,17 @@ PVRSRV_ERROR PVRSRVFindProcessMemStatsKM(IMG_PID pid,
                                          IMG_UINT32 ui32ArrSize,
                                          IMG_BOOL bAllProcessStats,
                                          IMG_UINT32 *ui32MemoryStats);
+
+static INLINE
+PVRSRV_ERROR DestroyServerResource(const SHARED_DEV_CONNECTION hConnection,
+                                   IMG_HANDLE hEvent,
+                                   ServerResourceDestroyFunction pfnDestroyCall,
+                                   IMG_HANDLE hResource)
+{
+    PVR_UNREFERENCED_PARAMETER(hEvent);
+
+    return pfnDestroyCall(GetBridgeHandle(hConnection), hResource);
+}
 
 #endif /* SRVCORE_H */
 

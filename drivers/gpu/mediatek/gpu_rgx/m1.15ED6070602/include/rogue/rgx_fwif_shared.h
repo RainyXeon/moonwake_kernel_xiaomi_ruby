@@ -49,6 +49,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "img_defs.h"
 #include "rgx_common.h"
 #include "powervr/mem_types.h"
+#include "devicemem_typedefs.h"
 
 /* Maximum number of UFOs in a CCB command.
  * The number is based on having 32 sync prims (as originally), plus 32 sync
@@ -284,6 +285,25 @@ typedef struct
 	RGX_CONTEXT_RESET_REASON eResetReason; /*!< Reset reason */
 	IMG_UINT32 ui32ResetExtJobRef;  /*!< External Job ID */
 } RGX_CONTEXT_RESET_REASON_DATA;
+
+#define RGX_HEAP_UM_PDS_RESERVED_SIZE               DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY
+#define RGX_HEAP_UM_PDS_RESERVED_REGION_OFFSET      0
+#define RGX_HEAP_PDS_RESERVED_TOTAL_SIZE            RGX_HEAP_UM_PDS_RESERVED_SIZE
+
+#define RGX_HEAP_UM_USC_RESERVED_SIZE               DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY
+#define RGX_HEAP_UM_USC_RESERVED_REGION_OFFSET      0
+#define RGX_HEAP_USC_RESERVED_TOTAL_SIZE            RGX_HEAP_UM_USC_RESERVED_SIZE
+
+#define RGX_HEAP_UM_GENERAL_RESERVED_SIZE           DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY
+#define RGX_HEAP_UM_GENERAL_RESERVED_REGION_OFFSET  0
+#if defined(SUPPORT_TRUSTED_DEVICE)
+#define RGX_HEAP_KM_GENERAL_RESERVED_SIZE           DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY
+#else
+#define RGX_HEAP_KM_GENERAL_RESERVED_SIZE           0
+#endif
+#define RGX_HEAP_KM_GENERAL_RESERVED_REGION_OFFSET  RGX_HEAP_UM_GENERAL_RESERVED_SIZE
+
+#define RGX_HEAP_GENERAL_RESERVED_TOTAL_SIZE        (RGX_HEAP_UM_GENERAL_RESERVED_SIZE + RGX_HEAP_KM_GENERAL_RESERVED_SIZE)
 #endif /*  RGX_FWIF_SHARED_H */
 
 /******************************************************************************

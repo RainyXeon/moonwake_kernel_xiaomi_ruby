@@ -46,12 +46,13 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "img_types.h"
 #include "pvrsrv_error.h"
+#include "rgxdevice.h"
 
 PVRSRV_ERROR ServerBridgeInit(void);
-PVRSRV_ERROR DeviceDepBridgeInit(IMG_UINT64 ui64Features);
+PVRSRV_ERROR DeviceDepBridgeInit(PVRSRV_RGXDEV_INFO *psDevInfo);
 
 PVRSRV_ERROR ServerBridgeDeInit(void);
-PVRSRV_ERROR DeviceDepBridgeDeInit(IMG_UINT64 ui64Features);
+PVRSRV_ERROR DeviceDepBridgeDeInit(PVRSRV_RGXDEV_INFO *psDevInfo);
 
 
 #endif  /* PVRSRV_BRIDGE_INIT_H */

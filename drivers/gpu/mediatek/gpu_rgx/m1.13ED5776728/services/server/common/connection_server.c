@@ -63,6 +63,9 @@ static PVRSRV_ERROR ConnectionDataDestroy(CONNECTION_DATA *psConnection)
 	PROCESS_HANDLE_BASE *psProcessHandleBase;
 	IMG_UINT64 ui64MaxBridgeTime;
 	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+	PVRSRV_DEVICE_NODE *psDevNode = OSGetDevNode(psConnection);
+#endif
 
 	if (psPVRSRVData->bUnload)
 	{
@@ -170,6 +173,21 @@ static PVRSRV_ERROR ConnectionDataDestroy(CONNECTION_DATA *psConnection)
 #endif
 
 	OSFreeMemNoStats(psConnection);
+
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+	/* Kick the Firmware to invalidate caches to clear all the zombie PMRs.
+	 * If there are not zombie PMRs or no mappings were freed the kick will not
+	 * be executed.
+	 *
+	 * This is needed:
+	 * - when the process is killed and the connection cleanup has to clean up
+	 *   all dangling handles.
+	 * - there are any outstanding PMRs in the zombie list due to no
+	 *   invalidation being executed before connection destruction
+	 */
+	eError = MMU_CacheInvalidateKick(psDevNode, NULL);
+	PVR_LOG_IF_ERROR(eError, "MMU_CacheInvalidateKick");
+#endif /* defined(SUPPORT_PMR_DEFERRED_FREE) */
 
 	return PVRSRV_OK;
 }
@@ -351,7 +369,7 @@ void PVRSRVCommonConnectionDisconnect(void *pvDataPtr)
 		psConnectionData->sCleanupThreadFn.bDependsOnHW = IMG_FALSE;
 		CLEANUP_THREAD_SET_RETRY_COUNT(&psConnectionData->sCleanupThreadFn,
 		                               CLEANUP_THREAD_RETRY_COUNT_DEFAULT);
-		PVRSRVCleanupThreadAddWork(&psConnectionData->sCleanupThreadFn);
+		PVRSRVCleanupThreadAddWork(psDevNode, &psConnectionData->sCleanupThreadFn);
 	}
 }
 

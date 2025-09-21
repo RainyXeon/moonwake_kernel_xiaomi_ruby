@@ -176,6 +176,8 @@ PVRSRV_ERROR HostMemDeviceCreate(PVRSRV_DEVICE_NODE **ppsDeviceNode)
 										  &psDeviceNode->apsPhysHeap[PVRSRV_PHYS_HEAP_CPU_LOCAL]);
 	PVR_LOG_RETURN_IF_ERROR(eError, "PhysHeapAcquire");
 
+	dllist_init(&psDeviceNode->sCleanupThreadWorkList);
+
 	return PVRSRV_OK;
 }
 

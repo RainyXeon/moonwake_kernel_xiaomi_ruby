@@ -746,6 +746,7 @@ typedef struct RGXFWIF_FWCOMMONCONTEXT_
 
 	PRGXFWIF_FWMEMCONTEXT	psFWMemContext;			/*!< Memory context */
 
+	IMG_UINT32				ui32ServiceCount;
 	/* Context suspend state */
 	PRGXFWIF_COMMONCTX_STATE	RGXFW_ALIGN psContextState;		/*!< TA/3D context suspend state, read/written by FW */
 

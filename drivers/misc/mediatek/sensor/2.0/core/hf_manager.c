@@ -114,7 +114,7 @@ static int hf_manager_report_event(struct hf_client *client,
 
 	spin_lock_irqsave(&hf_fifo->buffer_lock, flags);
 	if (unlikely(hf_fifo->buffull == true)) {
-		hang_time = ktime_get_boot_ns() - hf_fifo->hang_begin;
+		hang_time = ktime_get_boottime_ns() - hf_fifo->hang_begin;
 		if (hang_time >= max_hang_time) {
 			/* reset buffer */
 			hf_fifo->buffull = false;
@@ -161,9 +161,9 @@ static int hf_manager_report_event(struct hf_client *client,
 			hang_time = hf_fifo->hang_begin -
 				hf_fifo->client_active;
 			if (hang_time < max_hang_time)
-				hf_fifo->hang_begin = ktime_get_boot_ns();
+				hf_fifo->hang_begin = ktime_get_boottime_ns();
 		} else {
-			hf_fifo->hang_begin = ktime_get_boot_ns();
+			hf_fifo->hang_begin = ktime_get_boottime_ns();
 		}
 	}
 	spin_unlock_irqrestore(&hf_fifo->buffer_lock, flags);
@@ -245,7 +245,7 @@ static enum hrtimer_restart hf_manager_io_poll(struct hrtimer *timer)
 		(struct hf_manager *)container_of(timer,
 			struct hf_manager, io_poll_timer);
 
-	hf_manager_sched_sample(manager, ktime_get_boot_ns());
+	hf_manager_sched_sample(manager, ktime_get_boottime_ns());
 	hrtimer_forward_now(&manager->io_poll_timer,
 		ns_to_ktime(atomic64_read(&manager->io_poll_interval)));
 	return HRTIMER_RESTART;
@@ -569,7 +569,7 @@ static inline void hf_manager_save_update_enable(struct hf_client *client,
 		old->start_time = request->start_time;
 		/* update new */
 		if (!request->enable)
-			request->start_time = ktime_get_boot_ns();
+			request->start_time = ktime_get_boottime_ns();
 		request->enable = true;
 		request->down_sample = cmd->down_sample;
 		request->delay = batch->delay;
@@ -1236,7 +1236,7 @@ static int fetch_next(struct hf_client_fifo *hf_fifo,
 		*event = hf_fifo->buffer[hf_fifo->tail++];
 		hf_fifo->tail &= hf_fifo->bufsize - 1;
 		hf_fifo->buffull = false;
-		hf_fifo->client_active = ktime_get_boot_ns();
+		hf_fifo->client_active = ktime_get_boottime_ns();
 	}
 	spin_unlock_irqrestore(&hf_fifo->buffer_lock, flags);
 	return have_event;

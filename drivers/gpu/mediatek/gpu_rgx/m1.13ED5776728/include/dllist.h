@@ -102,7 +102,7 @@ void dllist_init(PDLLIST_NODE psListHead)
 */
 /*****************************************************************************/
 static INLINE
-bool dllist_is_empty(PDLLIST_NODE psListHead)
+bool dllist_is_empty(const DLLIST_NODE *const psListHead)
 {
 	return ((psListHead->psPrevNode == psListHead)
 			&& (psListHead->psNextNode == psListHead));
@@ -167,7 +167,7 @@ void dllist_add_to_tail(PDLLIST_NODE psListHead, PDLLIST_NODE psNewNode)
 */
 /*****************************************************************************/
 static INLINE
-bool dllist_node_is_in_list(PDLLIST_NODE psNode)
+bool dllist_node_is_in_list(const DLLIST_NODE *const psNode)
 {
 	return (psNode->psNextNode != NULL);
 }

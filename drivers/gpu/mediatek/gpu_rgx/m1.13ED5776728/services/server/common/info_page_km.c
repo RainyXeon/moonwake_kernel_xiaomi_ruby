@@ -126,6 +126,11 @@ PVRSRV_ERROR PVRSRVAcquireInfoPageKM(PMR **ppsPMR)
     /* Copy the PMR import handle back */
     *ppsPMR = psData->psInfoPagePMR;
 
+    /* Mark the PMR such that no layout changes can happen
+     * This is a fixed layout created during early stages of
+     * driver loading and shouldn't change later */
+    PMR_SetLayoutFixed(psData->psInfoPagePMR, IMG_TRUE);
+
     return PVRSRV_OK;
 }
 

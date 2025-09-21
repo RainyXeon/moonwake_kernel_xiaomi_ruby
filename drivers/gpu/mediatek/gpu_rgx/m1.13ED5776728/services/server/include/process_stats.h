@@ -70,8 +70,16 @@ typedef enum {
 	PVRSRV_MEM_ALLOC_TYPE_IOREMAP_PT_LMA,		/* ALLOC_PAGES_PT_LMA mapped to kernel address space */
 	PVRSRV_MEM_ALLOC_TYPE_ALLOC_LMA_PAGES,		/* pages allocated from LMA */
 	PVRSRV_MEM_ALLOC_TYPE_ALLOC_UMA_PAGES,		/* pages allocated from UMA */
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+	PVRSRV_MEM_ALLOC_TYPE_ZOMBIE_LMA_PAGES,		/* zombie pages allocated from LMA */
+	PVRSRV_MEM_ALLOC_TYPE_ZOMBIE_UMA_PAGES,		/* zombie pages allocated from UMA */
+#endif
 	PVRSRV_MEM_ALLOC_TYPE_MAP_UMA_LMA_PAGES,	/* mapped UMA/LMA pages */
 	PVRSRV_MEM_ALLOC_TYPE_UMA_POOL_PAGES,		/* pages in the page pool */
+	PVRSRV_MEM_ALLOC_TYPE_DMA_BUF_IMPORT,       /* dma-buf imports */
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+	PVRSRV_MEM_ALLOC_TYPE_DMA_BUF_ZOMBIE,       /* dma-buf zombie */
+#endif
 
 	/* Must be the last enum...*/
 	PVRSRV_MEM_ALLOC_TYPE_COUNT

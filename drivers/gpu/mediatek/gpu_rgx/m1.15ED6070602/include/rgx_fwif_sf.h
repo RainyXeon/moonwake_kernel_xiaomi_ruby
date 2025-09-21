@@ -325,6 +325,7 @@ X(222, RGXFW_GROUP_MAIN, RGXFW_SF_MAIN_CFI_TIMEOUT, "CFI Timeout detected (%d in
 X(223, RGXFW_GROUP_MAIN, RGXFW_SF_MAIN_CFI_TIMEOUT_FBM, "CFI Timeout detected for FBM (%d increasing to %d)", 2) \
 X(224, RGXFW_GROUP_MAIN, RGXFW_SF_MAIN_GEOM_OOM_DISALLOWED, "Geom OOM event not allowed", 0) \
 X(225, RGXFW_GROUP_MAIN, RGXFW_SF_MAIN_OS_PRIORITY_CHANGE, "Changing OSid %d's priority from %u to %u; Isolation = %u (0 = off; 1 = on)", 4) \
+X(288, RGXFW_GROUP_MAIN, RGXFW_SF_MAIN_ZERO_LM, "Zeroing local memory after context storing FWCtx = 0x%08.8x", 1) \
 \
 X(  1, RGXFW_GROUP_MTS, RGXFW_SF_MTS_BG_KICK_DEPRECATED, "Bg Task DM = %u, counted = %d", 2) \
 X(  2, RGXFW_GROUP_MTS, RGXFW_SF_MTS_BG_COMPLETE_DEPRECATED, "Bg Task complete DM = %u", 1) \

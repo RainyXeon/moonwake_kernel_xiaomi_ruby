@@ -70,9 +70,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 /*
 	RGX Device Virtual Address Space Definitions
 
-	NOTES:
-	Base addresses have to be a multiple of 4MiB
-
 	This file defines the RGX virtual address heaps that are used in
 	application memory contexts. It also shows where the Firmware memory heap
 	fits into this, but the firmware heap is only ever created in the
@@ -104,13 +101,13 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 /* 0x00_0000_0000 ************************************************************/
 
-/* 0x00_0000_0000 - 0x00_0040_0000 **/
-	/* 0 MiB to 4 MiB, size of 4 MiB : RESERVED **/
+/* 0x00_0000_0000 - 0x00_0020_0000 **/
+	/* 0 MiB to 2 MiB, size of 2 MiB : RESERVED **/
 
-/* 0x00_0040_0000 - 0x7F_FFC0_0000 **/
-	/* 4 MiB to 512 GiB, size of 512 GiB less 4 MiB : GENERAL_SVM_HEAP **/
-	#define RGX_GENERAL_SVM_HEAP_BASE           IMG_UINT64_C(0x0000400000)
-	#define RGX_GENERAL_SVM_HEAP_SIZE           (RGX_HEAP_SIZE_512GiB - RGX_HEAP_SIZE_4MiB)
+/* 0x00_0020_0000 - 0x7F_FFC0_0000 **/
+	/* 2 MiB to 512 GiB, size of 512 GiB less 2 MiB : GENERAL_SVM_HEAP **/
+	#define RGX_GENERAL_SVM_HEAP_BASE           IMG_UINT64_C(0x0000200000)
+	#define RGX_GENERAL_SVM_HEAP_SIZE           (RGX_HEAP_SIZE_512GiB - RGX_HEAP_SIZE_2MiB)
 
 
 /* 0x80_0000_0000 ************************************************************/

@@ -253,14 +253,17 @@ static void CleanupThreadDumpInfo(DUMPDEBUG_PRINTF_FUNC* pfnDumpDebugPrintf,
 	PVRSRV_DATA *psPVRSRVData;
 	psPVRSRVData = PVRSRVGetPVRSRVData();
 
-	PVR_DUMPDEBUG_LOG("    Number of deferred cleanup items : %u",
-			  OSAtomicRead(&psPVRSRVData->i32NumCleanupItems));
+	PVR_DUMPDEBUG_LOG("    Number of deferred cleanup items Queued : %u",
+		              OSAtomicRead(&psPVRSRVData->i32NumCleanupItemsQueued));
+	PVR_DUMPDEBUG_LOG("    Number of deferred cleanup items dropped after "
+		              "retry limit reached : %u",
+		              OSAtomicRead(&psPVRSRVData->i32NumCleanupItemsNotCompleted));
 }
 
 /* Add work to the cleanup thread work list.
  * The work item will be executed by the cleanup thread
  */
-void PVRSRVCleanupThreadAddWork(PVRSRV_CLEANUP_THREAD_WORK *psData)
+void PVRSRVCleanupThreadAddWork(PVRSRV_DEVICE_NODE *psDeviceNode, PVRSRV_CLEANUP_THREAD_WORK *psData)
 {
 	PVRSRV_DATA *psPVRSRVData;
 	PVRSRV_ERROR eError;
@@ -294,10 +297,10 @@ void PVRSRVCleanupThreadAddWork(PVRSRV_CLEANUP_THREAD_WORK *psData)
 
 		/* add this work item to the list */
 		OSSpinLockAcquire(psPVRSRVData->hCleanupThreadWorkListLock, uiFlags);
-		dllist_add_to_tail(&psPVRSRVData->sCleanupThreadWorkList, &psData->sNode);
+		dllist_add_to_tail(&psDeviceNode->sCleanupThreadWorkList, &psData->sNode);
 		OSSpinLockRelease(psPVRSRVData->hCleanupThreadWorkListLock, uiFlags);
 
-		OSAtomicIncrement(&psPVRSRVData->i32NumCleanupItems);
+		OSAtomicIncrement(&psPVRSRVData->i32NumCleanupItemsQueued);
 
 		/* signal the cleanup thread to ensure this item gets processed */
 		eError = OSEventObjectSignal(psPVRSRVData->hCleanupEventObject);
@@ -305,20 +308,164 @@ void PVRSRVCleanupThreadAddWork(PVRSRV_CLEANUP_THREAD_WORK *psData)
 	}
 }
 
-/* Pop an item from the head of the cleanup thread work list */
-static INLINE DLLIST_NODE *_CleanupThreadWorkListPop(PVRSRV_DATA *psPVRSRVData)
+void PVRSRVCleanupThreadWaitForDevice(PVRSRV_DEVICE_NODE *psDeviceNode)
 {
-	DLLIST_NODE *psNode;
+	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
+	IMG_BOOL bIsEmpty;
+
+	PVR_ASSERT(psDeviceNode != NULL);
+
+	if (gpsPVRSRVData->hCleanupThread == NULL)
+	{
+		return;
+	}
+
+	LOOP_UNTIL_TIMEOUT(OS_THREAD_DESTROY_TIMEOUT_US)
+	{
+		OS_SPINLOCK_FLAGS uiFlags;
+		PVRSRV_ERROR eError;
+
+		if (gpsPVRSRVData->hCleanupEventObject)
+		{
+			eError = OSEventObjectSignal(gpsPVRSRVData->hCleanupEventObject);
+			PVR_LOG_IF_ERROR(eError, "OSEventObjectSignal");
+		}
+
+		OSSpinLockAcquire(psPVRSRVData->hCleanupThreadWorkListLock, uiFlags);
+		bIsEmpty = dllist_is_empty(&psDeviceNode->sCleanupThreadWorkList);
+		OSSpinLockRelease(psPVRSRVData->hCleanupThreadWorkListLock, uiFlags);
+
+		if (bIsEmpty)
+		{
+			break;
+		}
+
+		OSWaitus(OS_THREAD_DESTROY_TIMEOUT_US / OS_THREAD_DESTROY_RETRY_COUNT);
+	} END_LOOP_UNTIL_TIMEOUT();
+
+	PVR_LOG_IF_FALSE(bIsEmpty, "Failed to flush device cleanup queue");
+}
+
+static INLINE DLLIST_NODE *_CleanupThreadWorkListLast(PVRSRV_DATA *psPVRSRVData)
+{
+	DLLIST_NODE *psNode = NULL;
+	PVRSRV_DEVICE_NODE *psDeviceNode;
 	OS_SPINLOCK_FLAGS uiFlags;
 
 	OSSpinLockAcquire(psPVRSRVData->hCleanupThreadWorkListLock, uiFlags);
-	psNode = dllist_get_next_node(&psPVRSRVData->sCleanupThreadWorkList);
+
+	/* We treat the Host device node as the last node in the list. */
+	psNode = dllist_get_prev_node(&psPVRSRVData->psHostMemDeviceNode->sCleanupThreadWorkList);
 	if (psNode != NULL)
 	{
-		dllist_remove_node(psNode);
+		OSSpinLockRelease(psPVRSRVData->hCleanupThreadWorkListLock, uiFlags);
+		return psNode;
 	}
+
+	/* Iterate over all devices and find the last node of the last device. */
+	for (psDeviceNode = psPVRSRVData->psDeviceNodeList;
+	     psDeviceNode != NULL;
+	     psDeviceNode = psDeviceNode->psNext)
+	{
+		DLLIST_NODE *psCurrNode = dllist_get_prev_node(&psDeviceNode->sCleanupThreadWorkList);
+		if (psCurrNode != NULL)
+		{
+			psNode = psCurrNode;
+		}
+	}
+
 	OSSpinLockRelease(psPVRSRVData->hCleanupThreadWorkListLock, uiFlags);
 
+	return psNode;
+}
+
+/* Pop an item from the head of the cleanup thread work lists.
+ *
+ * This pops an item in a round robin manner:
+ *
+ * 1. It starts from the first device and moves to next device if no cleanup
+ *    item found.
+ * 2. If no items were found in the regular devices bound lists it moves to the
+ *    Host device list.
+ * 3. In case there was nothing in the Host device items list but there was
+ *    something in the devices lists, it returns first found device bound item
+ *
+ * If `*ppsDeviceNode` is not NULL the lookup of the next cleanup item will
+ * start from the next devices after `*ppsDeviceNode`. This makes sure that
+ * we always pop a first item from each device and move to the next device.
+ * We prevent "starvation" of some devices this way.
+ */
+static INLINE DLLIST_NODE *_CleanupThreadWorkListPop(PVRSRV_DATA *psPVRSRVData,
+                                                     PVRSRV_DEVICE_NODE **ppsDeviceNode)
+{
+	PVRSRV_DEVICE_NODE *psDeviceNode = NULL, *psFirstDevice = NULL;
+	DLLIST_NODE *psNode = NULL, *psFirstNode = NULL;
+	OS_SPINLOCK_FLAGS uiFlags;
+	OSSpinLockAcquire(psPVRSRVData->hCleanupThreadWorkListLock, uiFlags);
+
+	/* always need to start from the beginning of the list in case some of the
+	 * devices were already destroyed */
+	for (psDeviceNode = psPVRSRVData->psDeviceNodeList;
+	     psDeviceNode != NULL;
+	     psDeviceNode = psDeviceNode->psNext)
+	{
+		psNode = dllist_get_next_node(&psDeviceNode->sCleanupThreadWorkList);
+
+		/* remember first non-NULL node and device in case no items are found
+		 * on later devices */
+		if (psNode != NULL && psFirstNode == NULL)
+		{
+			psFirstNode = psNode;
+			psFirstDevice = psDeviceNode;
+		}
+
+		/* to ensure that further device don't get starved skip the last device
+		 * until all devices are processed and then move to non-device bound
+		 * items */
+		if (*ppsDeviceNode != NULL) {
+			if (psDeviceNode == *ppsDeviceNode)
+			{
+				*ppsDeviceNode = NULL;
+			}
+
+			/* in case this is the last device and next iteration exits the
+			 * loop */
+			psNode = NULL;
+
+			continue;
+		}
+
+		if (psNode != NULL)
+		{
+			*ppsDeviceNode = psDeviceNode;
+			dllist_remove_node(psNode);
+
+			break;
+		}
+	}
+
+	/* if no item found in the regular devices check also the Host device */
+	if (psNode == NULL)
+	{
+		psNode = dllist_get_next_node(&psPVRSRVData->psHostMemDeviceNode->sCleanupThreadWorkList);
+		if (psNode != NULL)
+		{
+			dllist_remove_node(psNode);
+		}
+		*ppsDeviceNode = psPVRSRVData->psHostMemDeviceNode;
+	}
+
+	/* if no item found for the Host device check if there was a cleanup item
+	 * in one of the previous devices, this starts processing items from the
+	 * beginning without one extra empty call to "wrap around" */
+	if (psNode == NULL && psFirstNode != NULL)
+	{
+		psNode = psFirstNode;
+		*ppsDeviceNode = psFirstDevice;
+		dllist_remove_node(psNode);
+	}
+
+	OSSpinLockRelease(psPVRSRVData->hCleanupThreadWorkListLock, uiFlags);
 	return psNode;
 }
 
@@ -330,6 +477,14 @@ static IMG_BOOL _CleanupThreadProcessWorkList(PVRSRV_DATA *psPVRSRVData,
 	PVRSRV_ERROR eError;
 	IMG_BOOL bNeedRetry = IMG_FALSE;
 	OS_SPINLOCK_FLAGS uiFlags;
+	PVRSRV_DEVICE_NODE *psDeviceNode = NULL;
+
+	psNodeLast = _CleanupThreadWorkListLast(psPVRSRVData);
+	if (psNodeLast == NULL)
+	{
+		/* no elements to clean up */
+		return IMG_FALSE;
+	}
 
 	/* any callback functions which return error will be
 	 * moved to the back of the list, and additional items can be added
@@ -337,75 +492,72 @@ static IMG_BOOL _CleanupThreadProcessWorkList(PVRSRV_DATA *psPVRSRVData,
 	 * head of the list to the current tail (since the tail may always
 	 * be changing)
 	 */
-
-	OSSpinLockAcquire(psPVRSRVData->hCleanupThreadWorkListLock, uiFlags);
-	psNodeLast = dllist_get_prev_node(&psPVRSRVData->sCleanupThreadWorkList);
-	OSSpinLockRelease(psPVRSRVData->hCleanupThreadWorkListLock, uiFlags);
-
-	if (psNodeLast == NULL)
-	{
-		/* no elements to clean up */
-		return IMG_FALSE;
-	}
-
 	do
 	{
-		psNodeIter = _CleanupThreadWorkListPop(psPVRSRVData);
+		PVRSRV_CLEANUP_THREAD_WORK *psData;
+		CLEANUP_THREAD_FN pfnFree;
+		IMG_BOOL bRetry = IMG_FALSE;
 
-		if (psNodeIter != NULL)
+		psNodeIter = _CleanupThreadWorkListPop(psPVRSRVData, &psDeviceNode);
+		if (psNodeIter == NULL)
 		{
-			PVRSRV_CLEANUP_THREAD_WORK *psData = IMG_CONTAINER_OF(psNodeIter, PVRSRV_CLEANUP_THREAD_WORK, sNode);
-			CLEANUP_THREAD_FN pfnFree;
+			return IMG_FALSE;
+		}
 
-			/* get the function pointer address here so we have access to it
-			 * in order to report the error in case of failure, without having
-			 * to depend on psData not having been freed
+		psData = IMG_CONTAINER_OF(psNodeIter, PVRSRV_CLEANUP_THREAD_WORK, sNode);
+
+		/* get the function pointer address here so we have access to it
+		 * in order to report the error in case of failure, without having
+		 * to depend on psData not having been freed
+		 */
+		pfnFree = psData->pfnFree;
+
+		*pbUseGlobalEO = psData->bDependsOnHW;
+		eError = pfnFree(psData->pvData);
+
+		if (eError != PVRSRV_OK)
+		{
+			/* Move to back of the list, if this item's
+			 * retry count hasn't hit zero.
 			 */
-			pfnFree = psData->pfnFree;
-
-			*pbUseGlobalEO = psData->bDependsOnHW;
-			eError = pfnFree(psData->pvData);
-
-			if (eError != PVRSRV_OK)
+			if (CLEANUP_THREAD_IS_RETRY_TIMEOUT(psData))
 			{
-				/* move to back of the list, if this item's
-				 * retry count hasn't hit zero.
-				 */
-				if (CLEANUP_THREAD_IS_RETRY_TIMEOUT(psData))
+				if (CLEANUP_THREAD_RETRY_TIMEOUT_REACHED(psData))
 				{
-					if (CLEANUP_THREAD_RETRY_TIMEOUT_REACHED(psData))
-					{
-						bNeedRetry = IMG_TRUE;
-					}
-				}
-				else
-				{
-					if (psData->ui32RetryCount-- > 0)
-					{
-						bNeedRetry = IMG_TRUE;
-					}
-				}
-
-				if (bNeedRetry)
-				{
-					OSSpinLockAcquire(psPVRSRVData->hCleanupThreadWorkListLock, uiFlags);
-					dllist_add_to_tail(&psPVRSRVData->sCleanupThreadWorkList, psNodeIter);
-					OSSpinLockRelease(psPVRSRVData->hCleanupThreadWorkListLock, uiFlags);
-				}
-				else
-				{
-					PVR_DPF((PVR_DBG_ERROR, "Failed to free resource "
-								"(callback " IMG_PFN_FMTSPEC "). "
-								"Retry limit reached",
-								pfnFree));
+					bNeedRetry = IMG_TRUE;
+					bRetry = IMG_TRUE;
 				}
 			}
 			else
 			{
-				OSAtomicDecrement(&psPVRSRVData->i32NumCleanupItems);
+				if (psData->ui32RetryCount-- > 0)
+				{
+					bNeedRetry = IMG_TRUE;
+					bRetry = IMG_TRUE;
+				}
+			}
+
+			if (bRetry)
+			{
+				OSSpinLockAcquire(psPVRSRVData->hCleanupThreadWorkListLock, uiFlags);
+				dllist_add_to_tail(&psDeviceNode->sCleanupThreadWorkList, psNodeIter);
+				OSSpinLockRelease(psPVRSRVData->hCleanupThreadWorkListLock, uiFlags);
+			}
+			else
+			{
+				PVR_DPF((PVR_DBG_ERROR, "Failed to free resource (callback " IMG_PFN_FMTSPEC "). "
+				        "Retry limit reached", pfnFree));
+				OSAtomicDecrement(&psPVRSRVData->i32NumCleanupItemsQueued);
+				OSAtomicIncrement(&psPVRSRVData->i32NumCleanupItemsNotCompleted);
+
 			}
 		}
-	} while ((psNodeIter != NULL) && (psNodeIter != psNodeLast));
+		else
+		{
+			/* Ok returned */
+			OSAtomicDecrement(&psPVRSRVData->i32NumCleanupItemsQueued);
+		}
+	} while (psNodeIter != NULL && psNodeIter != psNodeLast);
 
 	return bNeedRetry;
 }
@@ -430,8 +582,6 @@ static PVRSRV_ERROR _CleanupThreadPrepare(PVRSRV_DATA *psPVRSRVData)
 	eError = OSSpinLockCreate(&psPVRSRVData->hCleanupThreadWorkListLock);
 	PVR_LOG_GOTO_IF_ERROR(eError, "OSLockCreate", Exit);
 
-	dllist_init(&psPVRSRVData->sCleanupThreadWorkList);
-
 Exit:
 	return eError;
 }
@@ -448,7 +598,9 @@ static void CleanupThread(void *pvData)
 
 	/* Store the process id (pid) of the clean-up thread */
 	psPVRSRVData->cleanupThreadPid = OSGetCurrentProcessID();
-	OSAtomicWrite(&psPVRSRVData->i32NumCleanupItems, 0);
+	psPVRSRVData->cleanupThreadTid = OSGetCurrentThreadID();
+	OSAtomicWrite(&psPVRSRVData->i32NumCleanupItemsQueued, 0);
+	OSAtomicWrite(&psPVRSRVData->i32NumCleanupItemsNotCompleted, 0);
 
 	PVR_DPF((CLEANUP_DPFL, "CleanupThread: thread starting... "));
 
@@ -470,8 +622,8 @@ static void CleanupThread(void *pvData)
 
 		if (psPVRSRVData->bUnload)
 		{
-			if (dllist_is_empty(&psPVRSRVData->sCleanupThreadWorkList) ||
-					uiUnloadRetry > CLEANUP_THREAD_UNLOAD_RETRY)
+			if (dllist_is_empty(&psPVRSRVData->psHostMemDeviceNode->sCleanupThreadWorkList) ||
+			    uiUnloadRetry > CLEANUP_THREAD_UNLOAD_RETRY)
 			{
 				break;
 			}
@@ -987,6 +1139,8 @@ static PVRSRV_ERROR _HostMemDeviceCreate(void)
 
 	psDeviceNode->pfnCreateRamBackedPMR[PVRSRV_DEVICE_PHYS_HEAP_CPU_LOCAL] = PhysmemNewOSRamBackedPMR;
 
+	dllist_init(&psDeviceNode->sCleanupThreadWorkList);
+
 	return PVRSRV_OK;
 }
 
@@ -1212,6 +1366,9 @@ PVRSRVCommonDriverInit(void)
 	OSFreeKMAppHintState(pvAppHintState);
 	pvAppHintState = NULL;
 
+	eError = _HostMemDeviceCreate();
+	PVR_GOTO_IF_ERROR(eError, Error);
+
 	eError = _CleanupThreadPrepare(gpsPVRSRVData);
 	PVR_LOG_GOTO_IF_ERROR(eError, "_CleanupThreadPrepare", Error);
 
@@ -1253,9 +1410,6 @@ PVRSRVCommonDriverInit(void)
 	eError = OSLockCreate(&gpsPVRSRVData->hHWPerfHostPeriodicThread_Lock);
 	PVR_LOG_GOTO_IF_ERROR(eError, "OSLockCreate:2", Error);
 #endif
-
-	eError = _HostMemDeviceCreate();
-	PVR_GOTO_IF_ERROR(eError, Error);
 
 	/* Initialise the Transport Layer */
 	eError = TLInit();
@@ -2013,6 +2167,8 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVCommonDeviceCreate(void *pvOSDevice,
 	PVR_LOG_GOTO_IF_ERROR(eError, "PVRSRVStatsRegisterProcess", ErrorFreeDeviceNode);
 #endif
 
+	dllist_init(&psDeviceNode->sCleanupThreadWorkList);
+
 	psDeviceNode->sDevId.i32UMIdentifier = i32UMIdentifier;
 
 	eError = SysDevInit(pvOSDevice, &psDevConfig);
@@ -2046,23 +2202,27 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVCommonDeviceCreate(void *pvOSDevice,
 	}
 #endif
 
-	/* Initialise the paravirtualised connection */
-	if (!PVRSRV_VZ_MODE_IS(NATIVE))
-	{
-		PvzConnectionInit(psDevConfig);
-		PVR_GOTO_IF_ERROR(eError, ErrorSysDevDeInit);
-	}
+	/* Next update value will be 0xFFFFFFF7 since sync prim starts with 0xFFFFFFF6.
+	 * Has to be set before call to PMRInitDevice(). */
+	psDeviceNode->ui32NextMMUInvalidateUpdate = 0xFFFFFFF7U;
+	psDeviceNode->uiPowerOffCounter = 0;
+	psDeviceNode->uiPowerOffCounterNext = 1;
 
 	eError = PVRSRVRegisterDbgTable(psDeviceNode,
 									g_aui32DebugOrderTable,
 									ARRAY_SIZE(g_aui32DebugOrderTable));
-	PVR_GOTO_IF_ERROR(eError, ErrorPvzConnectionDeInit);
+	PVR_GOTO_IF_ERROR(eError, ErrorSysDevDeInit);
 
 	eError = PVRSRVPowerLockInit(psDeviceNode);
 	PVR_GOTO_IF_ERROR(eError, ErrorUnregisterDbgTable);
 
 	eError = PVRSRVPhysMemHeapsInit(psDeviceNode, psDevConfig);
 	PVR_GOTO_IF_ERROR(eError, ErrorPowerLockDeInit);
+
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+	eError = PMRInitDevice(psDeviceNode);
+	PVR_GOTO_IF_ERROR(eError, ErrorPhysMemHeapsDeinit);
+#endif /* defined(SUPPORT_PMR_DEFERRED_FREE) */
 
 #if defined(SUPPORT_RGX)
 	/* Requirements:
@@ -2073,14 +2233,14 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVCommonDeviceCreate(void *pvOSDevice,
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to register device", __func__));
 		eError = PVRSRV_ERROR_DEVICE_REGISTER_FAILED;
-		goto ErrorPhysMemHeapsDeinit;
+		goto ErrorPMRDeInitDevice;
 	}
 #endif
 
 	if (psDeviceNode->pfnPhysMemDeviceHeapsInit != NULL)
 	{
 		psDeviceNode->pfnPhysMemDeviceHeapsInit(psDeviceNode);
-		PVR_GOTO_IF_ERROR(eError, ErrorPhysMemHeapsDeinit);
+		PVR_GOTO_IF_ERROR(eError, ErrorPMRDeInitDevice);
 	}
 
 	psDeviceNode->sDevMMUPxSetup.uiMMUPxLog2AllocGran = OSGetPageShift();
@@ -2130,8 +2290,8 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVCommonDeviceCreate(void *pvOSDevice,
 	TUtilsInit(psDeviceNode);
 #endif
 
-	OSWRLockCreate(&psDeviceNode->hMemoryContextPageFaultNotifyListLock);
-	if (psDeviceNode->hMemoryContextPageFaultNotifyListLock == NULL)
+	OSWRLockCreate(&psDeviceNode->hPageFaultNotifyLock);
+	if (psDeviceNode->hPageFaultNotifyLock == NULL)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to create lock for PF notify list",
 		        __func__));
@@ -2164,6 +2324,13 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVCommonDeviceCreate(void *pvOSDevice,
 	/* Finally insert the device into the dev-list and set it as active */
 	List_PVRSRV_DEVICE_NODE_InsertTail(&psPVRSRVData->psDeviceNodeList,
 									   psDeviceNode);
+
+	/* Initialise the paravirtualised connection */
+	if (!PVRSRV_VZ_MODE_IS(NATIVE))
+	{
+		PvzConnectionInit(psDevConfig);
+		PVR_GOTO_IF_ERROR(eError, ErrorDecrementDeviceCount);
+	}
 
 	*ppsDeviceNode = psDeviceNode;
 
@@ -2212,18 +2379,16 @@ ErrorDeInitRgx:
 #if defined(SUPPORT_RGX)
 	DevDeInitRGX(psDeviceNode);
 #endif
+ErrorPMRDeInitDevice:
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+	PMRDeInitDevice(psDeviceNode);
 ErrorPhysMemHeapsDeinit:
+#endif /* defined(SUPPORT_PMR_DEFERRED_FREE) */
 	PVRSRVPhysMemHeapsDeinit(psDeviceNode);
 ErrorPowerLockDeInit:
 	PVRSRVPowerLockDeInit(psDeviceNode);
 ErrorUnregisterDbgTable:
 	PVRSRVUnregisterDbgTable(psDeviceNode);
-ErrorPvzConnectionDeInit:
-	psDevConfig->psDevNode = NULL;
-	if (!PVRSRV_VZ_MODE_IS(NATIVE))
-	{
-		PvzConnectionDeInit();
-	}
 ErrorSysDevDeInit:
 	SysDevDeInit(psDevConfig);
 ErrorDeregisterStats:
@@ -2321,6 +2486,8 @@ PVRSRV_ERROR PVRSRVCommonDeviceInitialise(PVRSRV_DEVICE_NODE *psDeviceNode)
 #endif
 	PVRSRV_ERROR eError;
 
+	PDUMPCOMMENT("Common Device Initialisation");
+
 	if (psDeviceNode->eDevState != PVRSRV_DEVICE_STATE_INIT)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: Device already initialised", __func__));
@@ -2337,6 +2504,9 @@ PVRSRV_ERROR PVRSRVCommonDeviceInitialise(PVRSRV_DEVICE_NODE *psDeviceNode)
 	eError = PVRSRVStatsRegisterProcess(&hProcessStats);
 	PVR_LOG_RETURN_IF_ERROR(eError, "PVRSRVStatsRegisterProcess");
 #endif
+
+	eError = MMU_InitDevice(psDeviceNode);
+	PVR_LOG_RETURN_IF_ERROR(eError, "MMU_InitDevice");
 
 #if defined(SUPPORT_RGX)
 	eError = RGXInit(psDeviceNode);
@@ -2424,11 +2594,6 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVCommonDeviceDestroy(PVRSRV_DEVICE_NODE *psDevice
 	psPVRSRVData->ui32RegisteredDevices--;
 
 	psDeviceNode->eDevState = PVRSRV_DEVICE_STATE_DEINIT;
-
-	if (psDeviceNode->hMemoryContextPageFaultNotifyListLock != NULL)
-	{
-		OSWRLockDestroy(psDeviceNode->hMemoryContextPageFaultNotifyListLock);
-	}
 
 #if defined(SUPPORT_VALIDATION)
 	OSLockDestroyNoStats(psDeviceNode->hValidationLock);
@@ -2556,16 +2721,28 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVCommonDeviceDestroy(PVRSRV_DEVICE_NODE *psDevice
 
 	SyncServerDeinit(psDeviceNode);
 
+	MMU_DeInitDevice(psDeviceNode);
+
 #if defined(SUPPORT_RGX)
 	DevDeInitRGX(psDeviceNode);
 #endif
 
 	List_PVRSRV_DEVICE_NODE_Remove(psDeviceNode);
 
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+	/* must be called before PhysHeapDeInitDeviceHeaps() */
+	PMRDeInitDevice(psDeviceNode);
+#endif /* defined(SUPPORT_PMR_DEFERRED_FREE) */
+
 	PVRSRVPhysMemHeapsDeinit(psDeviceNode);
 	PVRSRVPowerLockDeInit(psDeviceNode);
 
 	PVRSRVUnregisterDbgTable(psDeviceNode);
+
+	if (psDeviceNode->hPageFaultNotifyLock != NULL)
+	{
+		OSWRLockDestroy(psDeviceNode->hPageFaultNotifyLock);
+	}
 
 	/* Release the Connection-Data lock as late as possible. */
 	if (psDeviceNode->hConnectionsLock)
@@ -2582,16 +2759,21 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVCommonDeviceDestroy(PVRSRV_DEVICE_NODE *psDevice
 	}
 	SysDevDeInit(psDeviceNode->psDevConfig);
 
+	PVRSRVCleanupThreadWaitForDevice(psDeviceNode);
+
+	List_PVRSRV_DEVICE_NODE_Remove(psDeviceNode);
+	psPVRSRVData->ui32RegisteredDevices--;
+
 	OSFreeMemNoStats(psDeviceNode);
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR _LMA_DoPhyContigPagesAlloc(RA_ARENA *, size_t, PG_HANDLE *, IMG_DEV_PHYADDR *);
 static PVRSRV_ERROR _LMA_DoPhyContigPagesAlloc(RA_ARENA *pArena,
                                                size_t uiSize,
                                                PG_HANDLE *psMemHandle,
-                                               IMG_DEV_PHYADDR *psDevPAddr)
+                                               IMG_DEV_PHYADDR *psDevPAddr,
+                                               IMG_PID uiPid)
 {
 	RA_BASE_T uiCardAddr = 0;
 	RA_LENGTH_T uiActualSize;
@@ -2625,10 +2807,10 @@ static PVRSRV_ERROR _LMA_DoPhyContigPagesAlloc(RA_ARENA *pArena,
 	{
 #if defined(PVRSRV_ENABLE_PROCESS_STATS)
 #if !defined(PVRSRV_ENABLE_MEMORY_STATS)
-	    PVRSRVStatsIncrMemAllocStatAndTrack(PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_LMA,
-	                                        uiSize,
-	                                        uiCardAddr,
-		                                    OSGetCurrentClientProcessIDKM());
+		PVRSRVStatsIncrMemAllocStatAndTrack(PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_LMA,
+		                                    uiSize,
+		                                    uiCardAddr,
+		                                    uiPid);
 #else
 		IMG_CPU_PHYADDR sCpuPAddr;
 		sCpuPAddr.uiAddr = psDevPAddr->uiAddr;
@@ -2638,7 +2820,7 @@ static PVRSRV_ERROR _LMA_DoPhyContigPagesAlloc(RA_ARENA *pArena,
 		                             sCpuPAddr,
 		                             uiSize,
 		                             NULL,
-		                             OSGetCurrentClientProcessIDKM()
+		                             uiPid,
 		                             DEBUG_MEMSTATS_VALUES);
 #endif
 #endif
@@ -2667,7 +2849,7 @@ static PVRSRV_ERROR _LMA_DoPhyContigPagesAlloc(RA_ARENA *pArena,
 #if defined(SUPPORT_GPUVIRT_VALIDATION)
 PVRSRV_ERROR LMA_PhyContigPagesAllocGPV(PVRSRV_DEVICE_NODE *psDevNode, size_t uiSize,
 							PG_HANDLE *psMemHandle, IMG_DEV_PHYADDR *psDevPAddr,
-                            IMG_UINT32 ui32OSid )
+							IMG_UINT32 ui32OSid, IMG_PID uiPid)
 {
 	RA_ARENA *pArena;
 	IMG_UINT32 ui32Log2NumPages = 0;
@@ -2694,7 +2876,8 @@ PVRSRV_ERROR LMA_PhyContigPagesAllocGPV(PVRSRV_DEVICE_NODE *psDevNode, size_t ui
 
 	psMemHandle->uiOSid = ui32OSid;		/* For Free() use */
 
-	eError =  _LMA_DoPhyContigPagesAlloc(pArena, uiSize, psMemHandle, psDevPAddr);
+	eError =  _LMA_DoPhyContigPagesAlloc(pArena, uiSize, psMemHandle,
+	                                     psDevPAddr, uiPid);
 	PVR_LOG_IF_ERROR(eError, "_LMA_DoPhyContigPagesAlloc");
 
 	return eError;
@@ -2702,7 +2885,8 @@ PVRSRV_ERROR LMA_PhyContigPagesAllocGPV(PVRSRV_DEVICE_NODE *psDevNode, size_t ui
 #endif
 
 PVRSRV_ERROR LMA_PhyContigPagesAlloc(PVRSRV_DEVICE_NODE *psDevNode, size_t uiSize,
-							PG_HANDLE *psMemHandle, IMG_DEV_PHYADDR *psDevPAddr)
+							PG_HANDLE *psMemHandle, IMG_DEV_PHYADDR *psDevPAddr,
+							IMG_PID uiPid)
 {
 	PVRSRV_ERROR eError;
 
@@ -2713,7 +2897,8 @@ PVRSRV_ERROR LMA_PhyContigPagesAlloc(PVRSRV_DEVICE_NODE *psDevNode, size_t uiSiz
 	ui32Log2NumPages = OSGetOrder(uiSize);
 	uiSize = (1 << ui32Log2NumPages) * OSGetPageSize();
 
-	eError = _LMA_DoPhyContigPagesAlloc(pArena, uiSize, psMemHandle, psDevPAddr);
+	eError = _LMA_DoPhyContigPagesAlloc(pArena, uiSize, psMemHandle,
+	                                    psDevPAddr, uiPid);
 	PVR_LOG_IF_ERROR(eError, "_LMA_DoPhyContigPagesAlloc");
 
 	return eError;
@@ -2894,9 +3079,6 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVDeviceFinalise(PVRSRV_DEVICE_NODE *psDeviceNode,
 		 * seen early in the driver start-up.
 		 */
 		SyncPrimSet(psDeviceNode->psMMUCacheSyncPrim, 0xFFFFFFF6UL);
-
-		/* Next update value will be 0xFFFFFFF7 since sync prim starts with 0xFFFFFFF6 */
-		psDeviceNode->ui32NextMMUInvalidateUpdate = 0xFFFFFFF7UL;
 
 		eError = PVRSRVPowerLock(psDeviceNode);
 		PVR_LOG_GOTO_IF_ERROR(eError, "PVRSRVPowerLock", ErrorExit);

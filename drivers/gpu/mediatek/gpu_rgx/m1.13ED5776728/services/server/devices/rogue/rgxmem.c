@@ -59,21 +59,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgx_bvnc_defs_km.h"
 #include "info_page.h"
 
-/*
- * TestAndReset of gui32CacheOps is protected by the device power-lock,
- * in the following way:
- *
- *   LOCK(Power-Lock);
- *     ui32CacheOps = _GetCacheOpsPending(); // Gets gui32CacheOpps
- *     if (ui32CacheOps)
- *     {
- *         _PrepareAndSubmitCacheCommand(ui32CacheOps);
- *         _CacheOpsCompleted(ui32CacheOps); // Resets gui32CacheOpps
- *     }
- *   UNLOCK(Power-lock);
- */
-static IMG_UINT32 gui32CacheOpps;
-
 
 typedef struct _SERVER_MMU_CONTEXT_ {
 	DEVMEM_MEMDESC *psFWMemContextMemDesc;
@@ -92,36 +77,26 @@ void RGXMMUCacheInvalidate(PVRSRV_DEVICE_NODE *psDeviceNode,
 						   IMG_BOOL bUnmap)
 {
 	PVRSRV_RGXDEV_INFO *psDevInfo = (PVRSRV_RGXDEV_INFO *)psDeviceNode->pvDevice;
+	IMG_UINT32 ui32NewCacheFlags = 0;
+
 	PVR_UNREFERENCED_PARAMETER(psMMUContext); /* Not used on Rogue, but needed by MMU common */
 	PVR_UNREFERENCED_PARAMETER(bUnmap);
 
 	switch (eMMULevel)
 	{
-		case MMU_LEVEL_3:	gui32CacheOpps |= RGXFWIF_MMUCACHEDATA_FLAGS_PC;
+		case MMU_LEVEL_3:	ui32NewCacheFlags |= RGXFWIF_MMUCACHEDATA_FLAGS_PC;
 							break;
-		case MMU_LEVEL_2:	gui32CacheOpps |= RGXFWIF_MMUCACHEDATA_FLAGS_PD;
+		case MMU_LEVEL_2:	ui32NewCacheFlags |= RGXFWIF_MMUCACHEDATA_FLAGS_PD;
 							break;
-		case MMU_LEVEL_1:	gui32CacheOpps |= RGXFWIF_MMUCACHEDATA_FLAGS_PT;
-							if (!(RGX_IS_FEATURE_SUPPORTED(psDevInfo, SLC_VIVT)))
-							{
-								gui32CacheOpps |= RGXFWIF_MMUCACHEDATA_FLAGS_TLB;
-							}
+		case MMU_LEVEL_1:	ui32NewCacheFlags |= RGXFWIF_MMUCACHEDATA_FLAGS_PT |
+							                     RGXFWIF_MMUCACHEDATA_FLAGS_TLB;
 							break;
 		default:
 							PVR_ASSERT(0);
 							break;
 	}
-}
 
-static inline IMG_UINT32 _GetCacheOpsPending(void)
-{
-	return gui32CacheOpps;
-}
-
-static inline void _CacheOpsCompleted(IMG_UINT32 ui32CacheOpsServiced)
-{
-	/* Mark in the global cache-ops that ui32CacheOpsServiced were submitted */
-	gui32CacheOpps ^= ui32CacheOpsServiced;
+	MMU_AppendCacheFlags(psDevInfo->psKernelMMUCtx, ui32NewCacheFlags);
 }
 
 static
@@ -160,6 +135,8 @@ PVRSRV_ERROR _PrepareAndSubmitCacheCommand(PVRSRV_DEVICE_NODE *psDeviceNode,
 		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to schedule MMU cache command to "
 		                        "DM=%d with error (%u)", __func__, eDM, eError));
 		psDeviceNode->ui32NextMMUInvalidateUpdate--;
+
+		MMU_AppendCacheFlags(psDevInfo->psKernelMMUCtx, sFlushCmd.uCmdData.sMMUCacheData.ui32Flags);
 	}
 
 	return eError;
@@ -171,6 +148,7 @@ PVRSRV_ERROR RGXMMUCacheInvalidateKick(PVRSRV_DEVICE_NODE *psDeviceNode,
 {
 	PVRSRV_ERROR eError;
 	IMG_UINT32 ui32CacheOps;
+	PVRSRV_RGXDEV_INFO *psDevInfo = (PVRSRV_RGXDEV_INFO *)psDeviceNode->pvDevice;
 
 	eError = PVRSRVPowerLock(psDeviceNode);
 	if (eError != PVRSRV_OK)
@@ -180,9 +158,14 @@ PVRSRV_ERROR RGXMMUCacheInvalidateKick(PVRSRV_DEVICE_NODE *psDeviceNode,
 		goto RGXMMUCacheInvalidateKick_exit;
 	}
 
-	ui32CacheOps = _GetCacheOpsPending();
+	/*
+	 * Atomically clear flags to ensure we never accidentally read state
+	 * inconsistently or overwrite valid cache flags with 0.
+	 */
+	ui32CacheOps = MMU_GetAndResetCacheFlags(psDevInfo->psKernelMMUCtx);
 	if (ui32CacheOps == 0)
 	{
+		/* Nothing to do if no cache ops pending */
 		eError = PVRSRV_OK;
 		goto _PowerUnlockAndReturnErr;
 	}
@@ -203,14 +186,7 @@ PVRSRV_ERROR RGXMMUCacheInvalidateKick(PVRSRV_DEVICE_NODE *psDeviceNode,
 	eError = _PrepareAndSubmitCacheCommand(psDeviceNode, RGXFWIF_DM_GP,
 	                                       ui32CacheOps, bInterrupt,
 										   pui32MMUInvalidateUpdate);
-	if (eError != PVRSRV_OK)
-	{
-		/* failed to submit cache operations, return failure */
-		goto _PowerUnlockAndReturnErr;
-	}
-
-	/* Mark the cache ops we serviced */
-	_CacheOpsCompleted(ui32CacheOps);
+	PVR_LOG_IF_ERROR(eError, "_PrepareAndSubmitCacheCommand");
 
 _PowerUnlockAndReturnErr:
 	PVRSRVPowerUnlock(psDeviceNode);
@@ -233,9 +209,14 @@ PVRSRV_ERROR RGXPreKickCacheCommand(PVRSRV_RGXDEV_INFO *psDevInfo,
 	/* Caller should ensure that power lock is held before calling this function */
 	PVR_ASSERT(OSLockIsLocked(psDeviceNode->hPowerLock));
 
-	ui32CacheOps = _GetCacheOpsPending();
+	/*
+	 * Atomically clear flags to ensure we never accidentally read state
+	 * inconsistently or overwrite valid cache flags with 0.
+	 */
+	ui32CacheOps = MMU_GetAndResetCacheFlags(psDevInfo->psKernelMMUCtx);
 	if (ui32CacheOps == 0)
 	{
+		/* Nothing to do if no cache ops pending */
 		return PVRSRV_OK;
 	}
 
@@ -246,8 +227,6 @@ PVRSRV_ERROR RGXPreKickCacheCommand(PVRSRV_RGXDEV_INFO *psDevInfo,
 		/* failed to submit cache operations, return failure */
 		return eError;
 	}
-
-	_CacheOpsCompleted(ui32CacheOps);
 
 	return eError;
 }

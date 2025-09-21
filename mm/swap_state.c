@@ -320,11 +320,6 @@ void free_pages_and_swap_cache(struct page **pages, int nr)
 	release_pages(pagep, nr);
 }
 
-bool swap_use_vma_readmore(void)
-{
-	return READ_ONCE(enable_vma_readahead) && !!READ_ONCE(page_cluster);
-}
-
 static inline bool swap_use_vma_readahead(void)
 {
 	return READ_ONCE(enable_vma_readahead) && !atomic_read(&nr_rotate_swap);
@@ -570,10 +565,6 @@ static unsigned long swapin_nr_pages(unsigned long offset)
  * the readahead.
  *
  * Caller must hold down_read on the vma->vm_mm if vmf->vma is not NULL.
- * This is needed to ensure the VMA will not be freed in our back. In the case
- * of the speculative page fault handler, this cannot happen, even if we don't
- * hold the mmap_sem. Callees are assumed to take care of reading VMA's fields
- * using READ_ONCE() to read consistent values.
  */
 struct page *swap_cluster_readahead(swp_entry_t entry, gfp_t gfp_mask,
 				struct vm_fault *vmf)
@@ -667,9 +658,9 @@ static inline void swap_ra_clamp_pfn(struct vm_area_struct *vma,
 				     unsigned long *start,
 				     unsigned long *end)
 {
-	*start = max3(lpfn, PFN_DOWN(READ_ONCE(vma->vm_start)),
+	*start = max3(lpfn, PFN_DOWN(vma->vm_start),
 		      PFN_DOWN(faddr & PMD_MASK));
-	*end = min3(rpfn, PFN_DOWN(READ_ONCE(vma->vm_end)),
+	*end = min3(rpfn, PFN_DOWN(vma->vm_end),
 		    PFN_DOWN((faddr & PMD_MASK) + PMD_SIZE));
 }
 

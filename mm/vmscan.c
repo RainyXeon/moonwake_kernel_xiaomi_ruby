@@ -118,13 +118,6 @@ struct scan_control {
 	/* Number of pages freed so far during a call to shrink_zones() */
 	unsigned long nr_reclaimed;
 
-	/*
-	 * Reclaim pages from a vma. If the page is shared by other tasks
-	 * it is zapped from a vma without reclaim so it ends up remaining
-	 * on memory until last task zap it.
-	 */
-	struct vm_area_struct *target_vma;
-
 	struct {
 		unsigned int dirty;
 		unsigned int unqueued_dirty;
@@ -1139,7 +1132,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 		struct address_space *mapping;
 		struct page *page;
 		int may_enter_fs;
-		enum page_references references = PAGEREF_RECLAIM;
+		enum page_references references = PAGEREF_RECLAIM_CLEAN;
 		bool dirty, writeback;
 
 		cond_resched();
@@ -1342,7 +1335,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 
 			if (unlikely(PageTransHuge(page)))
 				flags |= TTU_SPLIT_HUGE_PMD;
-			if (!try_to_unmap(page, flags, sc->target_vma)) {
+			if (!try_to_unmap(page, flags)) {
 				nr_unmap_fail++;
 				goto activate_locked;
 			}
@@ -1534,8 +1527,6 @@ unsigned long reclaim_clean_pages_from_list(struct zone *zone,
 		.gfp_mask = GFP_KERNEL,
 		.priority = DEF_PRIORITY,
 		.may_unmap = 1,
-		/* Doesn't allow to write out dirty page */
-		.may_writepage = 0,
 	};
 	unsigned long ret;
 	struct page *page, *next;
@@ -1555,58 +1546,6 @@ unsigned long reclaim_clean_pages_from_list(struct zone *zone,
 	mod_node_page_state(zone->zone_pgdat, NR_ISOLATED_FILE, -ret);
 	return ret;
 }
-
-#ifdef CONFIG_PROCESS_RECLAIM
-unsigned long reclaim_pages_from_list(struct list_head *page_list,
-					struct vm_area_struct *vma)
-{
-	unsigned long nr_isolated[2] = {0, };
-	struct pglist_data *pgdat = NULL;
-	struct scan_control sc = {
-		.gfp_mask = GFP_KERNEL,
-		.priority = DEF_PRIORITY,
-		.may_writepage = 1,
-		.may_unmap = 1,
-		.may_swap = 1,
-		.target_vma = vma,
-	};
-
-	unsigned long nr_reclaimed;
-	struct page *page;
-
-	if (list_empty(page_list))
-		return 0;
-
-	list_for_each_entry(page, page_list, lru) {
-		ClearPageActive(page);
-		if (pgdat == NULL)
-			pgdat = page_pgdat(page);
-		/* XXX: It could be multiple node in other config */
-		WARN_ON_ONCE(pgdat != page_pgdat(page));
-		if (!page_is_file_cache(page))
-			nr_isolated[0]++;
-		else
-			nr_isolated[1]++;
-	}
-
-	mod_node_page_state(pgdat, NR_ISOLATED_ANON, nr_isolated[0]);
-	mod_node_page_state(pgdat, NR_ISOLATED_FILE, nr_isolated[1]);
-
-	nr_reclaimed = shrink_page_list(page_list, pgdat, &sc,
-			TTU_IGNORE_ACCESS, NULL, true);
-
-	while (!list_empty(page_list)) {
-		page = lru_to_page(page_list);
-		list_del(&page->lru);
-		putback_lru_page(page);
-	}
-
-	mod_node_page_state(pgdat, NR_ISOLATED_ANON, -nr_isolated[0]);
-	mod_node_page_state(pgdat, NR_ISOLATED_FILE, -nr_isolated[1]);
-
-	return nr_reclaimed;
-}
-#endif
 
 /*
  * Attempt to remove the specified page from its LRU.  Only take this page

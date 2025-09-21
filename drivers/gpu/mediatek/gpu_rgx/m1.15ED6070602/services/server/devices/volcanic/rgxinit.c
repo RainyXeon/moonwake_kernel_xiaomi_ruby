@@ -1416,6 +1416,11 @@ PVRSRV_ERROR RGXInitDevPart2 (PVRSRV_DEVICE_NODE	*psDeviceNode,
 	eError = PVRSRVTQLoadShaders(psDeviceNode);
 	PVR_LOG_GOTO_IF_ERROR(eError, "PVRSRVTQLoadShaders", ErrorExit);
 
+#if defined(SUPPORT_SECURE_ALLOC_KM)
+	eError = OSAllocateSecBuf(psDeviceNode, RGXFWIF_KM_GENERAL_HEAP_TOTAL_BYTES, "SharedSecMem", &psDevInfo->psGenHeapSecMem);
+	PVR_LOG_GOTO_IF_ERROR(eError, "OSAllocateSecBuf", ErrorExit);
+#endif
+
 	psDevInfo->bDevInit2Done = IMG_TRUE;
 
 	return PVRSRV_OK;
@@ -3174,7 +3179,8 @@ static void RGXFreeUFOBlock(PVRSRV_DEVICE_NODE *psDeviceNode,
 		already.
 	*/
 	if (PVRSRVSystemSnoopingOfDeviceCache(psDeviceNode->psDevConfig) &&
-		psDeviceNode->eDevState != PVRSRV_DEVICE_STATE_DEINIT)
+		psDeviceNode->eDevState != PVRSRV_DEVICE_STATE_DEINIT &&
+		psDeviceNode->eDevState != PVRSRV_DEVICE_STATE_DESTRUCTING)
 	{
 		RGXFWIF_KCCB_CMD sFlushInvalCmd;
 		PVRSRV_ERROR eError;
@@ -3233,7 +3239,6 @@ PVRSRV_ERROR DevDeInitRGX(PVRSRV_DEVICE_NODE *psDeviceNode)
 	PVRSRV_RGXDEV_INFO		*psDevInfo = (PVRSRV_RGXDEV_INFO*)psDeviceNode->pvDevice;
 	PVRSRV_ERROR			eError;
 	DEVICE_MEMORY_INFO		*psDevMemoryInfo;
-	IMG_UINT32		ui32Temp=0;
 
 	if (!psDevInfo)
 	{
@@ -3247,66 +3252,8 @@ PVRSRV_ERROR DevDeInitRGX(PVRSRV_DEVICE_NODE *psDeviceNode)
 		KM_SET_OS_CONNECTION(OFFLINE, psDevInfo);
 	}
 
-	eError = DeviceDepBridgeDeInit(psDevInfo->sDevFeatureCfg.ui64Features);
+	eError = DeviceDepBridgeDeInit(psDevInfo);
 	PVR_LOG_IF_ERROR(eError, "DeviceDepBridgeDeInit");
-#if defined(PDUMP)
-	DevmemIntFreeDefBackingPage(psDeviceNode,
-								&psDeviceNode->sDummyPage,
-								DUMMY_PAGE);
-	DevmemIntFreeDefBackingPage(psDeviceNode,
-								&psDeviceNode->sDevZeroPage,
-								DEV_ZERO_PAGE);
-#endif
-
-#if defined(PVRSRV_FORCE_UNLOAD_IF_BAD_STATE)
-	if (PVRSRVGetPVRSRVData()->eServicesState != PVRSRV_SERVICES_STATE_OK)
-	{
-		OSAtomicWrite(&psDeviceNode->sDummyPage.atRefCounter, 0);
-		PVR_UNREFERENCED_PARAMETER(ui32Temp);
-	}
-	else
-#else
-	{
-		/*Delete the Dummy page related info */
-		ui32Temp = (IMG_UINT32)OSAtomicRead(&psDeviceNode->sDummyPage.atRefCounter);
-		if (0 != ui32Temp)
-		{
-			PVR_DPF((PVR_DBG_ERROR,
-			         "%s: Dummy page reference counter is non zero (%u)",
-			         __func__,
-			         ui32Temp));
-			PVR_ASSERT(0);
-		}
-	}
-#endif
-
-	/*Delete the Dummy page related info */
-	ui32Temp = (IMG_UINT32)OSAtomicRead(&psDeviceNode->sDevZeroPage.atRefCounter);
-	if (0 != ui32Temp)
-	{
-		PVR_DPF((PVR_DBG_ERROR,
-			     "%s: Zero page reference counter is non zero (%u)",
-			     __func__,
-			     ui32Temp));
-	}
-
-#if defined(PDUMP)
-	if (NULL != psDeviceNode->sDummyPage.hPdumpPg)
-	{
-		PDUMPCOMMENT("Error dummy page handle is still active");
-	}
-
-	if (NULL != psDeviceNode->sDevZeroPage.hPdumpPg)
-	{
-		PDUMPCOMMENT("Error Zero page handle is still active");
-	}
-#endif
-
-	/*The lock type need to be dispatch type here because it can be acquired from MISR (Z-buffer) path */
-	OSLockDestroy(psDeviceNode->sDummyPage.psPgLock);
-
-	/* Destroy the zero page lock */
-	OSLockDestroy(psDeviceNode->sDevZeroPage.psPgLock);
 
 	/* Unregister debug request notifiers first as they could depend on anything. */
 
@@ -3323,6 +3270,13 @@ PVRSRV_ERROR DevDeInitRGX(PVRSRV_DEVICE_NODE *psDeviceNode)
 	if (psDevInfo->bDevInit2Done)
 	{
 		psDevInfo->bDevInit2Done = IMG_FALSE;
+
+#if defined(SUPPORT_SECURE_ALLOC_KM)
+		if (psDevInfo->psGenHeapSecMem != NULL)
+		{
+			OSFreeSecBuf(psDevInfo->psGenHeapSecMem);
+		}
+#endif
 
 		eError = PVRSRVTQUnloadShaders(psDeviceNode);
 		if (eError != PVRSRV_OK)
@@ -3593,8 +3547,81 @@ typedef struct RGX_HEAP_INFO_TAG
 	IMG_DEVMEM_SIZE_T  uiHeapReservedRegionLength;
 	IMG_UINT32         ui32Log2ImportAlignment;
 	PFN_IS_PRESENT     pfnIsHeapPresent;
+	PFN_HEAP_INIT      pfnInit;
+	PFN_HEAP_DEINIT    pfnDeInit;
 	IMG_UINT32         ui32HeapInstanceFlags;
 } RGX_HEAP_INFO;
+
+#if defined(SUPPORT_SECURE_ALLOC_KM)
+/* Private data struct for general heap. */
+typedef struct RGX_GENERAL_HEAP_DATA_TAG
+{
+	DEVMEMINT_RESERVATION2  *psSecMemReservation;
+} RGX_GENERAL_HEAP_DATA;
+
+/* Init callback function for general heap. */
+static PVRSRV_ERROR GeneralHeapInit(PVRSRV_DEVICE_NODE *psDeviceNode,
+                                    DEVMEMINT_HEAP *psDevmemHeap,
+                                    IMG_HANDLE *phPrivData)
+{
+	PVRSRV_RGXDEV_INFO *psDevInfo;
+	RGX_GENERAL_HEAP_DATA *psHeapData;
+	IMG_DEV_VIRTADDR sCarveOutAddr;
+	PVRSRV_ERROR eError;
+
+	PVR_LOG_RETURN_IF_INVALID_PARAM(psDeviceNode, "psDeviceNode");
+	PVR_LOG_RETURN_IF_INVALID_PARAM(psDevmemHeap, "psDevmemHeap");
+	PVR_LOG_RETURN_IF_INVALID_PARAM(phPrivData, "phPrivData");
+
+	psDevInfo = psDeviceNode->pvDevice;
+
+	psHeapData = OSAllocMem(sizeof(*psHeapData));
+	PVR_LOG_RETURN_IF_NOMEM(psHeapData, "psHeapData");
+
+	/* Map the per device secure mem PMR allocation to the general devmem heap carveout. */
+	sCarveOutAddr = DevmemIntHeapGetBaseAddr(psDevmemHeap);
+	sCarveOutAddr.uiAddr += RGX_HEAP_KM_GENERAL_RESERVED_REGION_OFFSET;
+
+	eError = DevmemIntReserveRange2(psDevmemHeap,
+								   sCarveOutAddr,
+								   RGXFWIF_KM_GENERAL_HEAP_TOTAL_BYTES,
+								   PVRSRV_MEMALLOCFLAG_GPU_READABLE |
+								   PVRSRV_MEMALLOCFLAG_GPU_WRITEABLE,
+								   &psHeapData->psSecMemReservation);
+	PVR_GOTO_IF_ERROR(eError, ErrorFreeHeapData);
+
+	eError = DevmemIntMapPMR2(psDevmemHeap, psHeapData->psSecMemReservation, psDevInfo->psGenHeapSecMem);
+	PVR_GOTO_IF_ERROR(eError, ErrorUnreserve);
+
+	*phPrivData = (IMG_HANDLE)psHeapData;
+
+	return PVRSRV_OK;
+
+ErrorUnreserve:
+	DevmemIntUnreserveRange2(psHeapData->psSecMemReservation);
+ErrorFreeHeapData:
+	OSFreeMem(psHeapData);
+
+	return eError;
+}
+
+/* Deinit callback function for general heap. */
+static void GeneralHeapDeInit(IMG_HANDLE hPrivData)
+{
+	RGX_GENERAL_HEAP_DATA *psHeapData = (RGX_GENERAL_HEAP_DATA*)hPrivData;
+
+	PVR_ASSERT(hPrivData);
+
+	DevmemIntUnmapPMR2(psHeapData->psSecMemReservation);
+	DevmemIntUnreserveRange2(psHeapData->psSecMemReservation);
+
+	OSFreeMem(psHeapData);
+}
+#else
+/* Callbacks not used */
+#define GeneralHeapInit NULL
+#define GeneralHeapDeInit NULL
+#endif
 
 /* Feature Present function prototypes */
 
@@ -3644,31 +3671,31 @@ static IMG_BOOL FWVZMainHeapPresent(PVRSRV_RGXDEV_INFO* psDevInfo, const RGX_HEA
 
 static const RGX_HEAP_INFO gasRGXHeapLayoutApp[] =
 {
-	/* Name                             HeapBase                          HeapLength                        HeapReservedRegionLength                     Log2ImportAlignment pfnIsHeapPresent HeapInstanceFlags   */
-	{RGX_GENERAL_SVM_HEAP_IDENT,        RGX_GENERAL_SVM_HEAP_BASE,        RGX_GENERAL_SVM_HEAP_SIZE,        0,                                           0,                  NULL,            HEAP_INST_DEFAULT_VALUE},
-	{RGX_GENERAL_HEAP_IDENT,            RGX_GENERAL_HEAP_BASE,            RGX_GENERAL_HEAP_SIZE,            (1 * DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY), 0,                  NULL,            HEAP_INST_DEFAULT_VALUE},
-	{RGX_GENERAL_NON4K_HEAP_IDENT,      RGX_GENERAL_NON4K_HEAP_BASE,      RGX_GENERAL_NON4K_HEAP_SIZE,      0,                                           0,                  NULL,            HEAP_INST_DEFAULT_VALUE | HEAP_INST_NON4K_FLAG},
-	{RGX_PDSCODEDATA_HEAP_IDENT,        RGX_PDSCODEDATA_HEAP_BASE,        RGX_PDSCODEDATA_HEAP_SIZE,        (1 * DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY), 0,                  NULL,            HEAP_INST_DEFAULT_VALUE},
-	{RGX_USCCODE_HEAP_IDENT,            RGX_USCCODE_HEAP_BASE,            RGX_USCCODE_HEAP_SIZE,            (1 * DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY), 0,                  NULL,            HEAP_INST_DEFAULT_VALUE},
-	{RGX_VK_CAPT_REPLAY_HEAP_IDENT,     RGX_VK_CAPT_REPLAY_HEAP_BASE,     RGX_VK_CAPT_REPLAY_HEAP_SIZE,     0,                                           0,                  NULL,            HEAP_INST_DEFAULT_VALUE},
-	{RGX_SIGNALS_HEAP_IDENT,            RGX_SIGNALS_HEAP_BASE,            RGX_SIGNALS_HEAP_SIZE,            0,                                           0,                  NULL,            HEAP_INST_DEFAULT_VALUE},
-	{RGX_COMPONENT_CTRL_HEAP_IDENT,     RGX_COMPONENT_CTRL_HEAP_BASE,     RGX_COMPONENT_CTRL_HEAP_SIZE,     0,                                           0,                  NULL,            HEAP_INST_DEFAULT_VALUE},
-	{RGX_FBCDC_HEAP_IDENT,              RGX_FBCDC_HEAP_BASE,              RGX_FBCDC_HEAP_SIZE,              0,                                           0,                  NULL,            HEAP_INST_DEFAULT_VALUE},
-	{RGX_FBCDC_LARGE_HEAP_IDENT,        RGX_FBCDC_LARGE_HEAP_BASE,        RGX_FBCDC_LARGE_HEAP_SIZE,        0,                                           0,                  NULL,            HEAP_INST_DEFAULT_VALUE},
-	{RGX_PDS_INDIRECT_STATE_HEAP_IDENT, RGX_PDS_INDIRECT_STATE_HEAP_BASE, RGX_PDS_INDIRECT_STATE_HEAP_SIZE, 0,                                           0,                  NULL,            HEAP_INST_DEFAULT_VALUE},
-	{RGX_CMP_MISSION_RMW_HEAP_IDENT,    RGX_CMP_MISSION_RMW_HEAP_BASE,    RGX_CMP_MISSION_RMW_HEAP_SIZE,    0,                                           0,                  NULL,            HEAP_INST_DEFAULT_VALUE},
-	{RGX_CMP_SAFETY_RMW_HEAP_IDENT,     RGX_CMP_SAFETY_RMW_HEAP_BASE,     RGX_CMP_SAFETY_RMW_HEAP_SIZE,     0,                                           0,                  NULL,            HEAP_INST_DEFAULT_VALUE},
-	{RGX_TEXTURE_STATE_HEAP_IDENT,      RGX_TEXTURE_STATE_HEAP_BASE,      RGX_TEXTURE_STATE_HEAP_SIZE,      0,                                           0,                  NULL,            HEAP_INST_DEFAULT_VALUE},
-	{RGX_VISIBILITY_TEST_HEAP_IDENT,    RGX_VISIBILITY_TEST_HEAP_BASE,    RGX_VISIBILITY_TEST_HEAP_SIZE,    0,                                           0,                  NULL,            HEAP_INST_DEFAULT_VALUE}
+	/* Name                             HeapBase                          HeapLength                        HeapReservedRegionLength                     Log2ImportAlignment pfnIsHeapPresent      pfnInit           pfnDeInit          HeapInstanceFlags   */
+	{RGX_GENERAL_SVM_HEAP_IDENT,        RGX_GENERAL_SVM_HEAP_BASE,        RGX_GENERAL_SVM_HEAP_SIZE,        0,                                           0,                  NULL,                 NULL,             NULL,              HEAP_INST_DEFAULT_VALUE},
+	{RGX_GENERAL_HEAP_IDENT,            RGX_GENERAL_HEAP_BASE,            RGX_GENERAL_HEAP_SIZE,            RGX_HEAP_GENERAL_RESERVED_TOTAL_SIZE,        0,                  NULL,                 GeneralHeapInit,  GeneralHeapDeInit, HEAP_INST_DEFAULT_VALUE},
+	{RGX_GENERAL_NON4K_HEAP_IDENT,      RGX_GENERAL_NON4K_HEAP_BASE,      RGX_GENERAL_NON4K_HEAP_SIZE,      0,                                           0,                  NULL,                 NULL,             NULL,              HEAP_INST_DEFAULT_VALUE | HEAP_INST_NON4K_FLAG},
+	{RGX_PDSCODEDATA_HEAP_IDENT,        RGX_PDSCODEDATA_HEAP_BASE,        RGX_PDSCODEDATA_HEAP_SIZE,        RGX_HEAP_PDS_RESERVED_TOTAL_SIZE,            0,                  NULL,                 NULL,             NULL,              HEAP_INST_DEFAULT_VALUE},
+	{RGX_USCCODE_HEAP_IDENT,            RGX_USCCODE_HEAP_BASE,            RGX_USCCODE_HEAP_SIZE,            RGX_HEAP_USC_RESERVED_TOTAL_SIZE,            0,                  NULL,                 NULL,             NULL,              HEAP_INST_DEFAULT_VALUE},
+	{RGX_VK_CAPT_REPLAY_HEAP_IDENT,     RGX_VK_CAPT_REPLAY_HEAP_BASE,     RGX_VK_CAPT_REPLAY_HEAP_SIZE,     0,                                           0,                  NULL,                 NULL,             NULL,              HEAP_INST_DEFAULT_VALUE},
+	{RGX_SIGNALS_HEAP_IDENT,            RGX_SIGNALS_HEAP_BASE,            RGX_SIGNALS_HEAP_SIZE,            0,                                           0,                  NULL,                 NULL,             NULL,              HEAP_INST_DEFAULT_VALUE},
+	{RGX_COMPONENT_CTRL_HEAP_IDENT,     RGX_COMPONENT_CTRL_HEAP_BASE,     RGX_COMPONENT_CTRL_HEAP_SIZE,     0,                                           0,                  NULL,                 NULL,             NULL,              HEAP_INST_DEFAULT_VALUE},
+	{RGX_FBCDC_HEAP_IDENT,              RGX_FBCDC_HEAP_BASE,              RGX_FBCDC_HEAP_SIZE,              0,                                           0,                  NULL,                 NULL,             NULL,              HEAP_INST_DEFAULT_VALUE},
+	{RGX_FBCDC_LARGE_HEAP_IDENT,        RGX_FBCDC_LARGE_HEAP_BASE,        RGX_FBCDC_LARGE_HEAP_SIZE,        0,                                           0,                  NULL,                 NULL,             NULL,              HEAP_INST_DEFAULT_VALUE},
+	{RGX_PDS_INDIRECT_STATE_HEAP_IDENT, RGX_PDS_INDIRECT_STATE_HEAP_BASE, RGX_PDS_INDIRECT_STATE_HEAP_SIZE, 0,                                           0,                  NULL,                 NULL,             NULL,              HEAP_INST_DEFAULT_VALUE},
+	{RGX_CMP_MISSION_RMW_HEAP_IDENT,    RGX_CMP_MISSION_RMW_HEAP_BASE,    RGX_CMP_MISSION_RMW_HEAP_SIZE,    0,                                           0,                  NULL,                 NULL,             NULL,              HEAP_INST_DEFAULT_VALUE},
+	{RGX_CMP_SAFETY_RMW_HEAP_IDENT,     RGX_CMP_SAFETY_RMW_HEAP_BASE,     RGX_CMP_SAFETY_RMW_HEAP_SIZE,     0,                                           0,                  NULL,                 NULL,             NULL,              HEAP_INST_DEFAULT_VALUE},
+	{RGX_TEXTURE_STATE_HEAP_IDENT,      RGX_TEXTURE_STATE_HEAP_BASE,      RGX_TEXTURE_STATE_HEAP_SIZE,      0,                                           0,                  NULL,                 NULL,             NULL,              HEAP_INST_DEFAULT_VALUE},
+	{RGX_VISIBILITY_TEST_HEAP_IDENT,    RGX_VISIBILITY_TEST_HEAP_BASE,    RGX_VISIBILITY_TEST_HEAP_SIZE,    0,                                           0,                  NULL,                 NULL,             NULL,              HEAP_INST_DEFAULT_VALUE}
 };
 
 static const RGX_HEAP_INFO gasRGXHeapLayoutFW[] =
 {
-	/* Name                          HeapBase                             HeapLength                        HeapReservedRegionLength Log2ImportAlignment pfnPresent           HeapInstanceFlags*/
-	{RGX_FIRMWARE_CONFIG_HEAP_IDENT, RGX_FIRMWARE_GUEST_CONFIG_HEAP_BASE, RGX_FIRMWARE_CONFIG_HEAP_SIZE,    0,                       0,                  FWVZConfigPresent,   HEAP_INST_DEFAULT_VALUE},
-	{RGX_FIRMWARE_MAIN_HEAP_IDENT,   RGX_FIRMWARE_GUEST_MAIN_HEAP_BASE,   RGX_FIRMWARE_META_MAIN_HEAP_SIZE, 0,                       0,                  FWVZMainHeapPresent, HEAP_INST_DEFAULT_VALUE},
-	{RGX_FIRMWARE_MAIN_HEAP_IDENT,   RGX_FIRMWARE_HOST_MAIN_HEAP_BASE,    RGX_FIRMWARE_META_MAIN_HEAP_SIZE, 0,                       0,                  FWVZMainHeapPresent, HEAP_INST_DEFAULT_VALUE},
-	{RGX_FIRMWARE_CONFIG_HEAP_IDENT, RGX_FIRMWARE_HOST_CONFIG_HEAP_BASE,  RGX_FIRMWARE_CONFIG_HEAP_SIZE,    0,                       0,                  FWVZConfigPresent,   HEAP_INST_DEFAULT_VALUE}
+	/* Name                          HeapBase                             HeapLength                        HeapReservedRegionLength Log2ImportAlignment pfnPresent           pfnInit pfnDeInit HeapInstanceFlags*/
+	{RGX_FIRMWARE_CONFIG_HEAP_IDENT, RGX_FIRMWARE_GUEST_CONFIG_HEAP_BASE, RGX_FIRMWARE_CONFIG_HEAP_SIZE,    0,                       0,                  FWVZConfigPresent,   NULL,   NULL,     HEAP_INST_DEFAULT_VALUE},
+	{RGX_FIRMWARE_MAIN_HEAP_IDENT,   RGX_FIRMWARE_GUEST_MAIN_HEAP_BASE,   RGX_FIRMWARE_META_MAIN_HEAP_SIZE, 0,                       0,                  FWVZMainHeapPresent, NULL,   NULL,     HEAP_INST_DEFAULT_VALUE},
+	{RGX_FIRMWARE_MAIN_HEAP_IDENT,   RGX_FIRMWARE_HOST_MAIN_HEAP_BASE,    RGX_FIRMWARE_META_MAIN_HEAP_SIZE, 0,                       0,                  FWVZMainHeapPresent, NULL,   NULL,     HEAP_INST_DEFAULT_VALUE},
+	{RGX_FIRMWARE_CONFIG_HEAP_IDENT, RGX_FIRMWARE_HOST_CONFIG_HEAP_BASE,  RGX_FIRMWARE_CONFIG_HEAP_SIZE,    0,                       0,                  FWVZConfigPresent,   NULL,   NULL,     HEAP_INST_DEFAULT_VALUE}
 };
 
 /* Generic counting method. */
@@ -3726,7 +3753,7 @@ static void _InstantiateRequiredHeaps(PVRSRV_RGXDEV_INFO     *psDevInfo,
 
 		if (psHeapInfo->ui32HeapInstanceFlags & HEAP_INST_NON4K_FLAG)
 		{
-			ui32Log2DataPageSize = psDevInfo->ui32Log2Non4KPgSize;
+			ui32Log2DataPageSize = psDevInfo->psDeviceNode->ui32RGXLog2Non4KPgSize;
 		}
 		else
 		{
@@ -3739,6 +3766,8 @@ static void _InstantiateRequiredHeaps(PVRSRV_RGXDEV_INFO     *psDevInfo,
 			                 psHeapInfo->uiHeapReservedRegionLength,
 			                 ui32Log2DataPageSize,
 			                 psHeapInfo->ui32Log2ImportAlignment,
+			                 psHeapInfo->pfnInit,
+			                 psHeapInfo->pfnDeInit,
 			                 *psDeviceMemoryHeapCursor);
 
 		(*psDeviceMemoryHeapCursor)++;
@@ -3822,7 +3851,7 @@ static PVRSRV_ERROR RGXInitHeaps(PVRSRV_RGXDEV_INFO *psDevInfo,
 	if (RGX_GET_FEATURE_VALUE(psDevInfo, MMU_VERSION) >= 4)
 	{
 		IMG_UINT32 i;
-		const IMG_UINT32 ui32GeneralNon4KHeapPageSize = (1 << psDevInfo->ui32Log2Non4KPgSize);
+		const IMG_UINT32 ui32GeneralNon4KHeapPageSize = (1 << psDevInfo->psDeviceNode->ui32RGXLog2Non4KPgSize);
 		const IMG_UINT32 ui32RgxDefaultPageSize = (1 << RGXHeapDerivePageSize(OSGetPageShift()));
 
 		/*
@@ -4057,16 +4086,29 @@ ErrorDeinit:
 
 static void _ReadNon4KHeapPageSize(IMG_UINT32 *pui32Log2Non4KPgSize)
 {
-	void *pvAppHintState = NULL;
-	IMG_UINT32 ui32AppHintDefault = PVRSRV_APPHINT_GENERALNON4KHEAPPAGESIZE;
-	IMG_UINT32 ui32GeneralNon4KHeapPageSize;
+	IMG_UINT32 uiLog2OSPageShift = OSGetPageShift();
 
-	/* Get the page size for the dummy page from the NON4K heap apphint */
-	OSCreateKMAppHintState(&pvAppHintState);
-	OSGetKMAppHintUINT32(pvAppHintState, GeneralNon4KHeapPageSize,
-			&ui32AppHintDefault, &ui32GeneralNon4KHeapPageSize);
-	*pui32Log2Non4KPgSize = ExactLog2(ui32GeneralNon4KHeapPageSize);
-	OSFreeKMAppHintState(pvAppHintState);
+	/* We support Non4K pages only on platforms with 4KB pages. On all platforms
+	 * where OS pages are larger than 4KB we must ensure the non4K device memory
+	 * heap matches the page size used in all other device memory heaps, which
+	 * is the OS page size, see RGXHeapDerivePageSize. */
+	if (uiLog2OSPageShift > RGX_HEAP_4KB_PAGE_SHIFT)
+	{
+		*pui32Log2Non4KPgSize = RGXHeapDerivePageSize(uiLog2OSPageShift);
+	}
+	else
+	{
+		void *pvAppHintState = NULL;
+		IMG_UINT32 ui32AppHintDefault = PVRSRV_APPHINT_GENERALNON4KHEAPPAGESIZE;
+		IMG_UINT32 ui32GeneralNon4KHeapPageSize;
+
+		/* Get the page size for the dummy page from the NON4K heap apphint */
+		OSCreateKMAppHintState(&pvAppHintState);
+		OSGetKMAppHintUINT32(pvAppHintState, GeneralNon4KHeapPageSize,
+				&ui32AppHintDefault, &ui32GeneralNon4KHeapPageSize);
+		*pui32Log2Non4KPgSize = ExactLog2(ui32GeneralNon4KHeapPageSize);
+		OSFreeKMAppHintState(pvAppHintState);
+	}
 }
 
 /*
@@ -4166,46 +4208,6 @@ PVRSRV_ERROR RGXRegisterDevice (PVRSRV_DEVICE_NODE *psDeviceNode)
 
 	/* Register callback for initialising device-specific physical memory heaps */
 	psDeviceNode->pfnPhysMemDeviceHeapsInit = RGXPhysMemDeviceHeapsInit;
-
-	/* Set up required support for dummy page */
-	OSAtomicWrite(&(psDeviceNode->sDummyPage.atRefCounter), 0);
-	OSAtomicWrite(&(psDeviceNode->sDevZeroPage.atRefCounter), 0);
-
-	/* Set the order to 0 */
-	psDeviceNode->sDummyPage.sPageHandle.uiOrder = 0;
-	psDeviceNode->sDevZeroPage.sPageHandle.uiOrder = 0;
-
-	/* Set the size of the Dummy page to zero */
-	psDeviceNode->sDummyPage.ui32Log2PgSize = 0;
-
-	/* Set the size of the Zero page to zero */
-	psDeviceNode->sDevZeroPage.ui32Log2PgSize = 0;
-
-	/* Set the Dummy page phys addr */
-	psDeviceNode->sDummyPage.ui64PgPhysAddr = MMU_BAD_PHYS_ADDR;
-
-	/* Set the Zero page phys addr */
-	psDeviceNode->sDevZeroPage.ui64PgPhysAddr = MMU_BAD_PHYS_ADDR;
-
-	/* The lock can be acquired from MISR (Z-buffer) path */
-	eError = OSLockCreate(&psDeviceNode->sDummyPage.psPgLock);
-	if (PVRSRV_OK != eError)
-	{
-		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to create dummy page lock", __func__));
-		return eError;
-	}
-
-	/* Create the lock for zero page */
-	eError = OSLockCreate(&psDeviceNode->sDevZeroPage.psPgLock);
-	if (PVRSRV_OK != eError)
-	{
-		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to create Zero page lock", __func__));
-		goto free_dummy_page;
-	}
-#if defined(PDUMP)
-	psDeviceNode->sDummyPage.hPdumpPg = NULL;
-	psDeviceNode->sDevZeroPage.hPdumpPg = NULL;
-#endif
 
 	psDeviceNode->pfnHasFBCDCVersion31 = RGXSystemHasFBCDCVersion31;
 
@@ -4391,11 +4393,7 @@ PVRSRV_ERROR RGXRegisterDevice (PVRSRV_DEVICE_NODE *psDeviceNode)
 	             psDevInfo->sDevFeatureCfg.ui32N,
 	             psDevInfo->sDevFeatureCfg.ui32C);
 
-	_ReadNon4KHeapPageSize(&psDevInfo->ui32Log2Non4KPgSize);
-
-	/*Set the zero & dummy page sizes as needed for the heap with largest page size */
-	psDeviceNode->sDevZeroPage.ui32Log2PgSize = psDevInfo->ui32Log2Non4KPgSize;
-	psDeviceNode->sDummyPage.ui32Log2PgSize = psDevInfo->ui32Log2Non4KPgSize;
+	_ReadNon4KHeapPageSize(&psDeviceNode->ui32RGXLog2Non4KPgSize);
 
 	RGXInitMultiCoreInfo(psDeviceNode);
 
@@ -4447,31 +4445,9 @@ PVRSRV_ERROR RGXRegisterDevice (PVRSRV_DEVICE_NODE *psDeviceNode)
 	eError = RGXDebugInit(psDevInfo);
 	PVR_LOG_GOTO_IF_ERROR(eError, "RGXDebugInit", e16);
 
-#if defined(PDUMP)
-	eError = DevmemIntAllocDefBackingPage(psDeviceNode,
-										  &psDeviceNode->sDummyPage,
-										  PVR_DUMMY_PAGE_INIT_VALUE,
-										  DUMMY_PAGE,
-	                                      IMG_TRUE);
-	if (eError != PVRSRV_OK)
-	{
-		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to allocate dummy page.", __func__));
-		goto e17;
-	}
-	eError = DevmemIntAllocDefBackingPage(psDeviceNode,
-										  &psDeviceNode->sDevZeroPage,
-										  PVR_ZERO_PAGE_INIT_VALUE,
-										  DEV_ZERO_PAGE,
-	                                      IMG_TRUE);
-	if (eError != PVRSRV_OK)
-	{
-		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to allocate Zero page.", __func__));
-		goto e18;
-	}
-#endif
 
 	/* Initialise the device dependent bridges */
-	eError = DeviceDepBridgeInit(psDevInfo->sDevFeatureCfg.ui64Features);
+	eError = DeviceDepBridgeInit(psDevInfo);
 	PVR_LOG_IF_ERROR(eError, "DeviceDepBridgeInit");
 
 	/* Initialise error counters */
@@ -4479,14 +4455,6 @@ PVRSRV_ERROR RGXRegisterDevice (PVRSRV_DEVICE_NODE *psDeviceNode)
 
 	return PVRSRV_OK;
 
-#if defined(PDUMP)
-e18:
-	DevmemIntFreeDefBackingPage(psDeviceNode,
-								&psDeviceNode->sDummyPage,
-								DUMMY_PAGE);
-e17:
-	RGXDebugDeinit(psDevInfo);
-#endif
 e16:
 #if defined(SUPPORT_VALIDATION)
 	RGXPowerDomainDeInitState(&psDevInfo->sPowerDomainState);
@@ -4527,13 +4495,6 @@ e1:
 	OSWRLockDestroy(psDevInfo->hRenderCtxListLock);
 e0:
 	OSFreeMem(psDevInfo);
-
-	/* Destroy the zero page lock created above */
-	OSLockDestroy(psDeviceNode->sDevZeroPage.psPgLock);
-
-free_dummy_page:
-	/* Destroy the dummy page lock created above */
-	OSLockDestroy(psDeviceNode->sDummyPage.psPgLock);
 
 	PVR_ASSERT(eError != PVRSRV_OK);
 	return eError;
@@ -4675,6 +4636,8 @@ static PVRSRV_ERROR RGXInitFwRawHeap(DEVMEM_HEAP_BLUEPRINT *psDevMemHeap, IMG_UI
 		                 0,
 		                 ui32Log2RgxDefaultPageShift,
 		                 0,
+		                 NULL,
+		                 NULL,
 		                 psDevMemHeap);
 
 	return PVRSRV_OK;

@@ -65,6 +65,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Server-side bridge entry points
  */
 
+static_assert(CACHE_BATCH_MAX <= IMG_UINT32_MAX,
+	      "CACHE_BATCH_MAX must not be larger than IMG_UINT32_MAX");
+
 static IMG_INT
 PVRSRVBridgeCacheOpQueue(IMG_UINT32 ui32DispatchTableEntry,
 			 IMG_UINT8 * psCacheOpQueueIN_UI8,
@@ -88,19 +91,28 @@ PVRSRVBridgeCacheOpQueue(IMG_UINT32 ui32DispatchTableEntry,
 	IMG_BOOL bHaveEnoughSpace = IMG_FALSE;
 #endif
 
-	IMG_UINT32 ui32BufferSize =
-	    (psCacheOpQueueIN->ui32NumCacheOps * sizeof(PMR *)) +
-	    (psCacheOpQueueIN->ui32NumCacheOps * sizeof(IMG_HANDLE)) +
-	    (psCacheOpQueueIN->ui32NumCacheOps * sizeof(IMG_UINT64)) +
-	    (psCacheOpQueueIN->ui32NumCacheOps * sizeof(IMG_DEVMEM_OFFSET_T)) +
-	    (psCacheOpQueueIN->ui32NumCacheOps * sizeof(IMG_DEVMEM_SIZE_T)) +
-	    (psCacheOpQueueIN->ui32NumCacheOps * sizeof(PVRSRV_CACHE_OP)) + 0;
+	IMG_UINT32 ui32BufferSize = 0;
+	IMG_UINT64 ui64BufferSize =
+	    ((IMG_UINT64) psCacheOpQueueIN->ui32NumCacheOps * sizeof(PMR *)) +
+	    ((IMG_UINT64) psCacheOpQueueIN->ui32NumCacheOps * sizeof(IMG_HANDLE)) +
+	    ((IMG_UINT64) psCacheOpQueueIN->ui32NumCacheOps * sizeof(IMG_UINT64)) +
+	    ((IMG_UINT64) psCacheOpQueueIN->ui32NumCacheOps * sizeof(IMG_DEVMEM_OFFSET_T)) +
+	    ((IMG_UINT64) psCacheOpQueueIN->ui32NumCacheOps * sizeof(IMG_DEVMEM_SIZE_T)) +
+	    ((IMG_UINT64) psCacheOpQueueIN->ui32NumCacheOps * sizeof(PVRSRV_CACHE_OP)) + 0;
 
 	if (unlikely(psCacheOpQueueIN->ui32NumCacheOps > CACHE_BATCH_MAX))
 	{
 		psCacheOpQueueOUT->eError = PVRSRV_ERROR_BRIDGE_ARRAY_SIZE_TOO_BIG;
 		goto CacheOpQueue_exit;
 	}
+
+	if (ui64BufferSize > IMG_UINT32_MAX)
+	{
+		psCacheOpQueueOUT->eError = PVRSRV_ERROR_BRIDGE_BUFFER_TOO_SMALL;
+		goto CacheOpQueue_exit;
+	}
+
+	ui32BufferSize = (IMG_UINT32) ui64BufferSize;
 
 	if (ui32BufferSize != 0)
 	{
@@ -118,12 +130,11 @@ PVRSRVBridgeCacheOpQueue(IMG_UINT32 ui32DispatchTableEntry,
 			IMG_BYTE *pInputBuffer = (IMG_BYTE *) (void *)psCacheOpQueueIN;
 
 			pArrayArgsBuffer = &pInputBuffer[ui32InBufferOffset];
-			OSCachedMemSet(pArrayArgsBuffer, 0, ui32BufferSize);
 		}
 		else
 #endif
 		{
-			pArrayArgsBuffer = OSAllocZMemNoStats(ui32BufferSize);
+			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
 
 			if (!pArrayArgsBuffer)
 			{
@@ -136,6 +147,7 @@ PVRSRVBridgeCacheOpQueue(IMG_UINT32 ui32DispatchTableEntry,
 	if (psCacheOpQueueIN->ui32NumCacheOps != 0)
 	{
 		psPMRInt = (PMR **) IMG_OFFSET_ADDR(pArrayArgsBuffer, ui32NextOffset);
+		OSCachedMemSet(psPMRInt, 0, psCacheOpQueueIN->ui32NumCacheOps * sizeof(PMR *));
 		ui32NextOffset += psCacheOpQueueIN->ui32NumCacheOps * sizeof(PMR *);
 		hPMRInt2 = (IMG_HANDLE *) IMG_OFFSET_ADDR(pArrayArgsBuffer, ui32NextOffset);
 		ui32NextOffset += psCacheOpQueueIN->ui32NumCacheOps * sizeof(IMG_HANDLE);
@@ -289,7 +301,10 @@ CacheOpQueue_exit:
 	UnlockHandle(psConnection->psHandleBase);
 
 	/* Allocated space should be equal to the last updated offset */
-	PVR_ASSERT(ui32BufferSize == ui32NextOffset);
+#ifdef PVRSRV_NEED_PVR_ASSERT
+	if (psCacheOpQueueOUT->eError == PVRSRV_OK)
+		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
+#endif /* PVRSRV_NEED_PVR_ASSERT */
 
 #if defined(INTEGRITY_OS)
 	if (pArrayArgsBuffer)
@@ -422,13 +437,16 @@ PVRSRV_ERROR InitCACHEBridge(void)
 {
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_CACHE, PVRSRV_BRIDGE_CACHE_CACHEOPQUEUE,
-			      PVRSRVBridgeCacheOpQueue, NULL);
+			      PVRSRVBridgeCacheOpQueue, NULL, sizeof(PVRSRV_BRIDGE_IN_CACHEOPQUEUE),
+			      sizeof(PVRSRV_BRIDGE_OUT_CACHEOPQUEUE));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_CACHE, PVRSRV_BRIDGE_CACHE_CACHEOPEXEC,
-			      PVRSRVBridgeCacheOpExec, NULL);
+			      PVRSRVBridgeCacheOpExec, NULL, sizeof(PVRSRV_BRIDGE_IN_CACHEOPEXEC),
+			      sizeof(PVRSRV_BRIDGE_OUT_CACHEOPEXEC));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_CACHE, PVRSRV_BRIDGE_CACHE_CACHEOPLOG,
-			      PVRSRVBridgeCacheOpLog, NULL);
+			      PVRSRVBridgeCacheOpLog, NULL, sizeof(PVRSRV_BRIDGE_IN_CACHEOPLOG),
+			      sizeof(PVRSRV_BRIDGE_OUT_CACHEOPLOG));
 
 	return PVRSRV_OK;
 }

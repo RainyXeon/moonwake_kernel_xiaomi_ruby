@@ -108,13 +108,22 @@ static void MMapPMROpen(struct vm_area_struct *ps_vma)
 			 psPMR));
 
 	/* In case we get called anyway let's do things right by increasing the refcount and
-	 * locking down the physical addresses. */
+	 * locking down the physical addresses.
+	 */
 	PMRRefPMR(psPMR);
 
 	if (PMRLockSysPhysAddresses(psPMR) != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: Could not lock down physical addresses, aborting.", __func__));
 		PMRUnrefPMR(psPMR);
+	}
+	else
+	{
+		/* MMapPMROpen() is call when a process is forked, but only if
+		 * mappings are to be inherited so increment mapping count of the
+		 * PMR to prevent its layout cannot be changed (if sparse).
+		 */
+		PMRCpuMapCountIncr(psPMR);
 	}
 }
 
@@ -144,6 +153,8 @@ static void MMapPMRClose(struct vm_area_struct *ps_vma)
 #endif
 
 	PMRUnlockSysPhysAddresses(psPMR);
+	/* Decrement the mapping count before Unref of PMR (as Unref could destroy the PMR) */
+	PMRCpuMapCountDecr(psPMR);
 	PMRUnrefPMR(psPMR);
 }
 
@@ -344,11 +355,41 @@ OSMMapPMRGeneric(PMR *psPMR, PMR_MMAP_DATA pOSMMapData)
 	IMG_BOOL *pbValid;
 	IMG_BOOL bUseMixedMap = IMG_FALSE;
 	IMG_BOOL bUseVMInsertPage = IMG_FALSE;
+	IMG_DEVMEM_SIZE_T uiPmrVirtualSize;
+
+	uiLength = ps_vma->vm_end - ps_vma->vm_start;
+
+	PMR_LogicalSize(psPMR, &uiPmrVirtualSize);
+
+	/* Check early if the requested mapping size doesn't exceed the virtual
+	 * PMR size. */
+	if (uiPmrVirtualSize < uiLength)
+	{
+		PVR_GOTO_WITH_ERROR(eError, PVRSRV_ERROR_BAD_MAPPING, e0);
+	}
+
+	uiLog2PageSize = PMR_GetLog2Contiguity(psPMR);
+
+	/* Check the number of PFNs to be mapped is valid. */
+	uiNumOfPFNs = uiLength >> uiLog2PageSize;
+	if (uiNumOfPFNs == 0)
+	{
+		PVR_LOG_VA(PVR_DBG_ERROR,
+		           "uiLength is invalid. Must be >= %u.",
+		           1 << uiLog2PageSize);
+		PVR_GOTO_WITH_ERROR(eError, PVRSRV_ERROR_BAD_MAPPING, e0);
+	}
+
+	/*
+	 * Take a reference on the PMR so that it can't be freed while mapped
+	 * into the user process.
+	 */
+	PMRRefPMR(psPMR);
 
 	eError = PMRLockSysPhysAddresses(psPMR);
 	if (eError != PVRSRV_OK)
 	{
-		goto e0;
+		goto ErrUnrefPMR;
 	}
 
 	if (((ps_vma->vm_flags & VM_WRITE) != 0) &&
@@ -358,6 +399,12 @@ OSMMapPMRGeneric(PMR *psPMR, PMR_MMAP_DATA pOSMMapData)
 		goto e1;
 	}
 
+	/* Increment mapping count of the PMR so that its layout cannot be
+	 * changed (if sparse).
+	 */
+	PMRLockPMR(psPMR);
+
+	PMRCpuMapCountIncr(psPMR);
 	sPageProt = vm_get_page_prot(ps_vma->vm_flags);
 
 	eError = DevmemCPUCacheMode(psDevNode,
@@ -365,7 +412,7 @@ OSMMapPMRGeneric(PMR *psPMR, PMR_MMAP_DATA pOSMMapData)
 	                            &ui32CPUCacheFlags);
 	if (eError != PVRSRV_OK)
 	{
-		goto e0;
+		goto e1;
 	}
 
 	switch (ui32CPUCacheFlags)
@@ -410,8 +457,6 @@ OSMMapPMRGeneric(PMR *psPMR, PMR_MMAP_DATA pOSMMapData)
 	/* Don't allow mapping to be inherited across a process fork */
 	ps_vma->vm_flags |= VM_DONTCOPY;
 
-	uiLength = ps_vma->vm_end - ps_vma->vm_start;
-
 	/* Is this mmap targeting non order-zero pages or does it use pfn mappings?
 	 * If yes, don't use vm_insert_page */
 	uiLog2PageSize = PMR_GetLog2Contiguity(psPMR);
@@ -425,20 +470,11 @@ OSMMapPMRGeneric(PMR *psPMR, PMR_MMAP_DATA pOSMMapData)
 	if (uiNumOfPFNs > PMR_MAX_TRANSLATION_STACK_ALLOC)
 	{
 		psCpuPAddr = OSAllocMem(uiNumOfPFNs * sizeof(*psCpuPAddr));
-		if (psCpuPAddr == NULL)
-		{
-			eError = PVRSRV_ERROR_OUT_OF_MEMORY;
-			goto e1;
-		}
+		PVR_LOG_GOTO_IF_NOMEM(psCpuPAddr, eError, e1);
 
 		/* Should allocation fail, clean-up here before exiting */
 		pbValid = OSAllocMem(uiNumOfPFNs * sizeof(*pbValid));
-		if (pbValid == NULL)
-		{
-			eError = PVRSRV_ERROR_OUT_OF_MEMORY;
-			OSFreeMem(psCpuPAddr);
-			goto e2;
-		}
+		PVR_LOG_GOTO_IF_NOMEM(pbValid, eError, e2);
 	}
 	else
 	{
@@ -565,17 +601,12 @@ OSMMapPMRGeneric(PMR *psPMR, PMR_MMAP_DATA pOSMMapData)
 	/* Install open and close handlers for ref-counting */
 	ps_vma->vm_ops = &gsMMapOps;
 
-	/*
-	 * Take a reference on the PMR so that it can't be freed while mapped
-	 * into the user process.
-	 */
-	PMRRefPMR(psPMR);
-
 #if defined(PVRSRV_ENABLE_LINUX_MMAP_STATS)
 	/* record the stats */
 	MMapStatsAddOrUpdatePMR(psPMR, uiLength);
 #endif
 
+	PMRUnlockPMR(psPMR);
 	return PVRSRV_OK;
 
 	/* Error exit paths follow */
@@ -590,7 +621,11 @@ e2:
 		OSFreeMem(psCpuPAddr);
 	}
 e1:
+	PMRCpuMapCountDecr(psPMR);
+	PMRUnlockPMR(psPMR);
 	PMRUnlockSysPhysAddresses(psPMR);
+ErrUnrefPMR:
+	PMRUnrefPMR(psPMR);
 e0:
 	return eError;
 }
