@@ -510,19 +510,7 @@ static u32 bbr_tso_segs(struct sock *sk, unsigned int mss_now)
 static u32 bbr_tso_segs_goal(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
-
-<<<<<<< HEAD
 	return  bbr_tso_segs_generic(sk, tp->mss_cache, GSO_LEGACY_MAX_SIZE);
-=======
-	/* Sort of tcp_tso_autosize() but ignoring
-	 * driver provided sk_gso_max_size.
-	 */
-	bytes = min_t(unsigned long, sk->sk_pacing_rate >> sk->sk_pacing_shift,
-		      GSO_MAX_SIZE - 1 - MAX_TCP_HEADER);
-	segs = max_t(u32, bytes / tp->mss_cache, bbr_min_tso_segs(sk));
-
-	return min(segs, 0x7FU);
->>>>>>> ben/android-4.19.y-mediatek
 }
 
 /* Save "last known good" cwnd so we can restore it after losses or PROBE_RTT */
