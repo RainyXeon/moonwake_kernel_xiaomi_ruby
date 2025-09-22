@@ -183,6 +183,9 @@ typedef enum _RGX_FEATURE_WITH_VALUE_INDEX_ {
 #define	FIX_HW_BRN_68777_POS                                        	(1U)
 #define	FIX_HW_BRN_68777_BIT_MASK                                   	(IMG_UINT64_C(0x0000000000000002))
 
+#define	FIX_HW_BRN_71422_POS                                        	(2U)
+#define	FIX_HW_BRN_71422_BIT_MASK                                   	(IMG_UINT64_C(0x0000000000000004))
+
 /* Macro used for padding the unavailable values for features with values */
 #define RGX_FEATURE_VALUE_INVALID	(0xFFFFFFFEU)
 

@@ -168,7 +168,8 @@ void OSThreadDumpInfo(DUMPDEBUG_PRINTF_FUNC* pfnDumpDebugPrintf,
 }
 
 PVRSRV_ERROR OSPhyContigPagesAlloc(PVRSRV_DEVICE_NODE *psDevNode, size_t uiSize,
-							PG_HANDLE *psMemHandle, IMG_DEV_PHYADDR *psDevPAddr)
+							PG_HANDLE *psMemHandle, IMG_DEV_PHYADDR *psDevPAddr,
+							IMG_PID uiPid)
 {
 	struct device *psDev = psDevNode->psDevConfig->pvOSDevice;
 	IMG_CPU_PHYADDR sCpuPAddr;
@@ -225,18 +226,20 @@ PVRSRV_ERROR OSPhyContigPagesAlloc(PVRSRV_DEVICE_NODE *psDevNode, size_t uiSize,
 #if defined(PVRSRV_ENABLE_PROCESS_STATS)
 #if !defined(PVRSRV_ENABLE_MEMORY_STATS)
 	PVRSRVStatsIncrMemAllocStatAndTrack(PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_UMA,
-										uiSize,
-										(IMG_UINT64)(uintptr_t) psPage,
-										OSGetCurrentClientProcessIDKM());
+	                                    uiSize,
+	                                    (IMG_UINT64)(uintptr_t) psPage,
+	                                    uiPid);
 #else
 	PVRSRVStatsAddMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_UMA,
 	                             psPage,
-								 sCpuPAddr,
-								 uiSize,
-								 NULL,
-								 OSGetCurrentClientProcessIDKM()
-								 DEBUG_MEMSTATS_VALUES);
+	                             sCpuPAddr,
+	                             uiSize,
+	                             NULL,
+	                             uiPid
+	                             DEBUG_MEMSTATS_VALUES);
 #endif
+#else
+	PVR_UNREFERENCED_PARAMETER(uiPid);
 #endif
 
 	return PVRSRV_OK;
@@ -747,6 +750,7 @@ static const error_map_t asErrorMap[] =
 	{-ENOMEM, PVRSRV_ERROR_OUT_OF_MEMORY},
 	{-EACCES, PVRSRV_ERROR_PMR_NOT_PERMITTED},
 	{-EINVAL, PVRSRV_ERROR_INVALID_PARAMS},
+	{-EINVAL, PVRSRV_ERROR_BAD_MAPPING},
 
 	{0,       PVRSRV_OK}
 };

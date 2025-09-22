@@ -1648,7 +1648,7 @@ static void ion_buffer_sync_for_device(struct ion_buffer *buffer,
 	mutex_unlock(&buffer->lock);
 }
 
-static int ion_vm_fault(struct vm_fault *vmf)
+static vm_fault_t ion_vm_fault(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	struct dma_buf *dmabuf = vma->vm_private_data;

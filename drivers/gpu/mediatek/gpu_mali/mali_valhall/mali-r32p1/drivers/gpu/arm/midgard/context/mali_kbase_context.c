@@ -176,10 +176,7 @@ int kbase_context_common_init(struct kbase_context *kctx)
 
 		if (unlikely(err))
 			return err;
-	}
 
-	/* Check if this is a Userspace created context */
-	if (likely(kctx->filp)) {
 		/* This merely takes a reference on the mm_struct and not on the
 		 * address space and so won't block the freeing of address space
 		 * on process exit.

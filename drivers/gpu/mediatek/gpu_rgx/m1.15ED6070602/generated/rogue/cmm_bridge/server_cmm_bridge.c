@@ -199,9 +199,9 @@ PVRSRVBridgeDevmemIntUnexportCtx(IMG_UINT32 ui32DispatchTableEntry,
 	LockHandle(psConnection->psHandleBase);
 
 	psDevmemIntUnexportCtxOUT->eError =
-	    PVRSRVReleaseHandleStagedUnlock(psConnection->psHandleBase,
-					    (IMG_HANDLE) psDevmemIntUnexportCtxIN->hContextExport,
-					    PVRSRV_HANDLE_TYPE_DEVMEMINT_CTX_EXPORT);
+	    PVRSRVDestroyHandleStagedUnlocked(psConnection->psHandleBase,
+					      (IMG_HANDLE) psDevmemIntUnexportCtxIN->hContextExport,
+					      PVRSRV_HANDLE_TYPE_DEVMEMINT_CTX_EXPORT);
 	if (unlikely((psDevmemIntUnexportCtxOUT->eError != PVRSRV_OK) &&
 		     (psDevmemIntUnexportCtxOUT->eError != PVRSRV_ERROR_RETRY)))
 	{
@@ -325,7 +325,7 @@ DevmemIntAcquireRemoteCtx_exit:
 			/* Lock over handle creation cleanup. */
 			LockHandle(psConnection->psHandleBase);
 
-			eError = PVRSRVReleaseHandleUnlocked(psConnection->psHandleBase,
+			eError = PVRSRVDestroyHandleUnlocked(psConnection->psHandleBase,
 							     (IMG_HANDLE)
 							     psDevmemIntAcquireRemoteCtxOUT->
 							     hContext,
@@ -339,14 +339,12 @@ DevmemIntAcquireRemoteCtx_exit:
 			 * This should never fail... */
 			PVR_ASSERT((eError == PVRSRV_OK) || (eError == PVRSRV_ERROR_RETRY));
 
-			/* Avoid freeing/destroying/releasing the resource a second time below */
-			psContextInt = NULL;
 			/* Release now we have cleaned up creation handles. */
 			UnlockHandle(psConnection->psHandleBase);
 
 		}
 
-		if (psContextInt)
+		else if (psContextInt)
 		{
 			DevmemIntCtxDestroy(psContextInt);
 		}
@@ -372,13 +370,19 @@ PVRSRV_ERROR InitCMMBridge(void)
 {
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_CMM, PVRSRV_BRIDGE_CMM_DEVMEMINTEXPORTCTX,
-			      PVRSRVBridgeDevmemIntExportCtx, NULL);
+			      PVRSRVBridgeDevmemIntExportCtx, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_DEVMEMINTEXPORTCTX),
+			      sizeof(PVRSRV_BRIDGE_OUT_DEVMEMINTEXPORTCTX));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_CMM, PVRSRV_BRIDGE_CMM_DEVMEMINTUNEXPORTCTX,
-			      PVRSRVBridgeDevmemIntUnexportCtx, NULL);
+			      PVRSRVBridgeDevmemIntUnexportCtx, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_DEVMEMINTUNEXPORTCTX),
+			      sizeof(PVRSRV_BRIDGE_OUT_DEVMEMINTUNEXPORTCTX));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_CMM, PVRSRV_BRIDGE_CMM_DEVMEMINTACQUIREREMOTECTX,
-			      PVRSRVBridgeDevmemIntAcquireRemoteCtx, NULL);
+			      PVRSRVBridgeDevmemIntAcquireRemoteCtx, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_DEVMEMINTACQUIREREMOTECTX),
+			      sizeof(PVRSRV_BRIDGE_OUT_DEVMEMINTACQUIREREMOTECTX));
 
 	return PVRSRV_OK;
 }

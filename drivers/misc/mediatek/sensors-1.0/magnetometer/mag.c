@@ -676,7 +676,7 @@ int mag_data_report(struct mag_data *data)
 	event.reserved = data->reserved[0];
 
 	if (event.reserved == 1)
-		mark_timestamp(ID_MAGNETIC, DATA_REPORT, ktime_get_boot_ns(),
+		mark_timestamp(ID_MAGNETIC, DATA_REPORT, ktime_get_boottime_ns(),
 			       event.time_stamp);
 	err = sensor_input_event(mag_context_obj->mdev.minor, &event);
 	return err;

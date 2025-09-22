@@ -7,6 +7,7 @@
 
 #include <net/sock.h>
 #include <net/tcp.h>
+#include <net/tls.h>
 
 static bool sk_msg_try_coalesce_ok(struct sk_msg *msg, int elem_first_coalesce)
 {
@@ -72,6 +73,45 @@ int sk_msg_alloc(struct sock *sk, struct sk_msg *msg, int len,
 	return ret;
 }
 EXPORT_SYMBOL_GPL(sk_msg_alloc);
+
+int sk_msg_clone(struct sock *sk, struct sk_msg *dst, struct sk_msg *src,
+		 u32 off, u32 len)
+{
+	int i = src->sg.start;
+	struct scatterlist *sge = sk_msg_elem(src, i);
+	u32 sge_len, sge_off;
+
+	if (sk_msg_full(dst))
+		return -ENOSPC;
+
+	while (off) {
+		if (sge->length > off)
+			break;
+		off -= sge->length;
+		sk_msg_iter_var_next(i);
+		if (i == src->sg.end && off)
+			return -ENOSPC;
+		sge = sk_msg_elem(src, i);
+	}
+
+	while (len) {
+		sge_len = sge->length - off;
+		sge_off = sge->offset + off;
+		if (sge_len > len)
+			sge_len = len;
+		off = 0;
+		len -= sge_len;
+		sk_msg_page_add(dst, sg_page(sge), sge_len, sge_off);
+		sk_mem_charge(sk, sge_len);
+		sk_msg_iter_var_next(i);
+		if (i == src->sg.end && len)
+			return -ENOSPC;
+		sge = sk_msg_elem(src, i);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(sk_msg_clone);
 
 void sk_msg_return_zero(struct sock *sk, struct sk_msg *msg, int bytes)
 {
@@ -220,18 +260,28 @@ void sk_msg_trim(struct sock *sk, struct sk_msg *msg, int len)
 
 	msg->sg.data[i].length -= trim;
 	sk_mem_uncharge(sk, trim);
+	/* Adjust copybreak if it falls into the trimmed part of last buf */
+	if (msg->sg.curr == i && msg->sg.copybreak > msg->sg.data[i].length)
+		msg->sg.copybreak = msg->sg.data[i].length;
 out:
-	/* If we trim data before curr pointer update copybreak and current
-	 * so that any future copy operations start at new copy location.
+	sk_msg_iter_var_next(i);
+	msg->sg.end = i;
+
+	/* If we trim data a full sg elem before curr pointer update
+	 * copybreak and current so that any future copy operations
+	 * start at new copy location.
 	 * However trimed data that has not yet been used in a copy op
 	 * does not require an update.
 	 */
-	if (msg->sg.curr >= i) {
+	if (!msg->sg.size) {
+		msg->sg.curr = msg->sg.start;
+		msg->sg.copybreak = 0;
+	} else if (sk_msg_iter_dist(msg->sg.start, msg->sg.curr) >=
+		   sk_msg_iter_dist(msg->sg.start, msg->sg.end)) {
+		sk_msg_iter_var_prev(i);
 		msg->sg.curr = i;
 		msg->sg.copybreak = msg->sg.data[i].length;
 	}
-	sk_msg_iter_var_next(i);
-	msg->sg.end = i;
 }
 EXPORT_SYMBOL_GPL(sk_msg_trim);
 
@@ -360,7 +410,7 @@ static int sk_psock_skb_ingress(struct sk_psock *psock, struct sk_buff *skb)
 	sk_mem_charge(sk, skb->len);
 	copied = skb->len;
 	msg->sg.start = 0;
-	msg->sg.end = num_sge == MAX_MSG_FRAGS ? 0 : num_sge;
+	msg->sg.end = num_sge;
 	msg->skb = skb;
 
 	sk_psock_queue_msg(psock, msg);
@@ -440,6 +490,7 @@ struct sk_psock *sk_psock_init(struct sock *sk, int node)
 
 	psock->sk = sk;
 	psock->eval =  __SK_NONE;
+	psock->saved_destroy = prot->destroy;
 
 	INIT_LIST_HEAD(&psock->link);
 	spin_lock_init(&psock->link_lock);
@@ -451,7 +502,7 @@ struct sk_psock *sk_psock_init(struct sock *sk, int node)
 	sk_psock_set_state(psock, SK_PSOCK_TX_ENABLED);
 	refcount_set(&psock->refcnt, 1);
 
-	rcu_assign_sk_user_data(sk, psock);
+	rcu_assign_sk_user_data_nocopy(sk, psock);
 	sock_hold(sk);
 
 	return psock;
@@ -622,34 +673,79 @@ static struct sk_psock *sk_psock_from_strp(struct strparser *strp)
 	return container_of(parser, struct sk_psock, parser);
 }
 
-static void sk_psock_verdict_apply(struct sk_psock *psock,
-				   struct sk_buff *skb, int verdict)
+static void sk_psock_skb_redirect(struct sk_psock *psock, struct sk_buff *skb)
 {
 	struct sk_psock *psock_other;
 	struct sock *sk_other;
 	bool ingress;
 
+	sk_other = tcp_skb_bpf_redirect_fetch(skb);
+	if (unlikely(!sk_other)) {
+		kfree_skb(skb);
+		return;
+	}
+	psock_other = sk_psock(sk_other);
+	if (!psock_other || sock_flag(sk_other, SOCK_DEAD) ||
+	    !sk_psock_test_state(psock_other, SK_PSOCK_TX_ENABLED)) {
+		kfree_skb(skb);
+		return;
+	}
+
+	ingress = tcp_skb_bpf_ingress(skb);
+	if ((!ingress && sock_writeable(sk_other)) ||
+	    (ingress &&
+	     atomic_read(&sk_other->sk_rmem_alloc) <=
+	     sk_other->sk_rcvbuf)) {
+		if (!ingress)
+			skb_set_owner_w(skb, sk_other);
+		skb_queue_tail(&psock_other->ingress_skb, skb);
+		schedule_work(&psock_other->work);
+	} else {
+		kfree_skb(skb);
+	}
+}
+
+static void sk_psock_tls_verdict_apply(struct sk_psock *psock,
+				       struct sk_buff *skb, int verdict)
+{
 	switch (verdict) {
 	case __SK_REDIRECT:
-		sk_other = tcp_skb_bpf_redirect_fetch(skb);
-		if (unlikely(!sk_other))
-			goto out_free;
-		psock_other = sk_psock(sk_other);
-		if (!psock_other || sock_flag(sk_other, SOCK_DEAD) ||
-		    !sk_psock_test_state(psock_other, SK_PSOCK_TX_ENABLED))
-			goto out_free;
-		ingress = tcp_skb_bpf_ingress(skb);
-		if ((!ingress && sock_writeable(sk_other)) ||
-		    (ingress &&
-		     atomic_read(&sk_other->sk_rmem_alloc) <=
-		     sk_other->sk_rcvbuf)) {
-			if (!ingress)
-				skb_set_owner_w(skb, sk_other);
-			skb_queue_tail(&psock_other->ingress_skb, skb);
-			schedule_work(&psock_other->work);
-			break;
-		}
-		/* fall-through */
+		sk_psock_skb_redirect(psock, skb);
+		break;
+	case __SK_PASS:
+	case __SK_DROP:
+	default:
+		break;
+	}
+}
+
+int sk_psock_tls_strp_read(struct sk_psock *psock, struct sk_buff *skb)
+{
+	struct bpf_prog *prog;
+	int ret = __SK_PASS;
+
+	rcu_read_lock();
+	prog = READ_ONCE(psock->progs.skb_verdict);
+	if (likely(prog)) {
+		tcp_skb_bpf_redirect_clear(skb);
+		ret = sk_psock_bpf_run(psock, prog, skb);
+		ret = sk_psock_map_verd(ret, tcp_skb_bpf_redirect_fetch(skb));
+	}
+	rcu_read_unlock();
+	sk_psock_tls_verdict_apply(psock, skb, ret);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(sk_psock_tls_strp_read);
+
+static void sk_psock_verdict_apply(struct sk_psock *psock,
+				   struct sk_buff *skb, int verdict)
+{
+	struct sock *sk_other;
+
+	switch (verdict) {
+	case __SK_REDIRECT:
+		sk_psock_skb_redirect(psock, skb);
+		break;
 	case __SK_DROP:
 		/* fall-through */
 	default:
@@ -703,9 +799,13 @@ static void sk_psock_data_ready(struct sock *sk)
 	rcu_read_lock();
 	psock = sk_psock(sk);
 	if (likely(psock)) {
-		write_lock_bh(&sk->sk_callback_lock);
-		strp_data_ready(&psock->parser.strp);
-		write_unlock_bh(&sk->sk_callback_lock);
+		if (tls_sw_has_ctx_rx(sk)) {
+			psock->parser.saved_data_ready(sk);
+		} else {
+			write_lock_bh(&sk->sk_callback_lock);
+			strp_data_ready(&psock->parser.strp);
+			write_unlock_bh(&sk->sk_callback_lock);
+		}
 	}
 	rcu_read_unlock();
 }

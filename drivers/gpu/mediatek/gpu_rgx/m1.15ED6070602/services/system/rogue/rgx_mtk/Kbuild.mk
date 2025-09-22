@@ -26,8 +26,22 @@ $(PVRSRVKM_NAME)-y += \
 	services/server/common/vz_vmm_vm.o \
 	services/system/rogue/$(PVR_SYSTEM)/ion_support.o \
 	services/system/rogue/$(PVR_SYSTEM)/mtk_pp.o \
-	services/system/rogue/$(PVR_SYSTEM)/sysconfig.o \
+	services/system/rogue/$(PVR_SYSTEM)/sysconfig.o
+
+ifeq ($(MTK_PLATFORM),mt6761)
+ifneq ($(filter $(CONFIG_MTK_GPUFREQ_V2),y m),)
+$(PVRSRVKM_NAME)-y += \
+	services/system/rogue/$(PVR_SYSTEM)/mt6761_v2/mtk_mfgsys.o
+else
+$(PVRSRVKM_NAME)-y += \
 	services/system/rogue/$(PVR_SYSTEM)/$(MTK_PLATFORM)/mtk_mfgsys.o
+endif
+endif
+
+ifeq ($(MTK_PLATFORM),mt6765)
+$(PVRSRVKM_NAME)-y += \
+	services/system/rogue/$(PVR_SYSTEM)/$(MTK_PLATFORM)/mtk_mfgsys.o
+endif
 
 ifeq ($(MTK_PLATFORM),mt6739)
 $(PVRSRVKM_NAME)-y += \
@@ -36,7 +50,6 @@ endif
 
 ccflags-y += \
 	-I$(TOP)/services/system/rogue/$(PVR_SYSTEM) \
-	-I$(TOP)/services/system/rogue/$(PVR_SYSTEM)/$(MTK_PLATFORM) \
 	-I$(TOP)/services/system/rogue/common/env/linux \
 	-I$(TOP)/services/linux/include \
 	-I$(TOP)/kernel/drivers/staging/imgtec \
@@ -44,18 +57,39 @@ ccflags-y += \
 	-I$(srctree)/drivers/staging/android/ion \
 	-I$(srctree)/drivers/staging/android/ion/mtk
 
-ifeq ($(kernel_ver),kernel-4.19)
+ifeq ($(MTK_PLATFORM),mt6761)
+ifneq ($(filter $(CONFIG_MTK_GPUFREQ_V2),y m),)
+ccflags-y += \
+	-I$(TOP)/services/system/rogue/$(PVR_SYSTEM)/mt6761_v2
+else
+ccflags-y += \
+	-I$(TOP)/services/system/rogue/$(PVR_SYSTEM)/$(MTK_PLATFORM)
+endif
+endif
+
+ifeq ($(MTK_PLATFORM),mt6765)
+ccflags-y += \
+	-I$(TOP)/services/system/rogue/$(PVR_SYSTEM)/$(MTK_PLATFORM)
+endif
+
+ifeq ($(MTK_PLATFORM),mt6739)
+ccflags-y += \
+	-I$(TOP)/services/system/rogue/$(PVR_SYSTEM)/$(MTK_PLATFORM)
+endif
+
+ifeq ($(kernel_ver),kernel-4.14)
+ccflags-y += \
+	-I$(srctree)/drivers/misc/mediatek/gpu/ged/include \
+	-I$(srctree)/drivers/misc/mediatek/include/mt-plat \
+	-I$(srctree)/drivers/misc/mediatek/gpu/gpu_bm \
+	-I$(srctree)/drivers/misc/mediatek/base/power/$(MTK_PLATFORM)
+else
 ccflags-y += \
 	-I$(srctree)/drivers/gpu/mediatek \
 	-I$(srctree)/drivers/gpu/mediatek/ged/include \
 	-I$(srctree)/drivers/gpu/mediatek/mt-plat \
 	-I$(srctree)/drivers/gpu/mediatek/gpu_bm \
 	-I$(srctree)/drivers/gpu/mediatek/gpufreq/include \
+	-I$(srctree)/drivers/gpu/mediatek/gpufreq/v2/include \
 	-I$(srctree)/drivers/gpu/mediatek/gpufreq/$(MTK_PLATFORM)
-else
-ccflags-y += \
-	-I$(srctree)/drivers/misc/mediatek/gpu/ged/include \
-	-I$(srctree)/drivers/misc/mediatek/include/mt-plat \
-	-I$(srctree)/drivers/misc/mediatek/gpu/gpu_bm \
-	-I$(srctree)/drivers/misc/mediatek/base/power/$(MTK_PLATFORM)
 endif

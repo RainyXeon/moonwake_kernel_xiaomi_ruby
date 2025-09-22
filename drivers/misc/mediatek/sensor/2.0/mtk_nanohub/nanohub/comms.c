@@ -312,7 +312,7 @@ int nanohub_comms_rx_retrans_boottime(struct nanohub_data *data,
 
 	do {
 		data->comms.open(data);
-		boottime = ktime_get_boot_ns();
+		boottime = ktime_get_boottime_ns();
 		packet_size =
 		    packet_create(&pad->packet, seq, cmd, sizeof(boottime),
 				  (u8 *)&boottime, false);

@@ -223,6 +223,13 @@ typedef struct _PVR_TL_TEST_CMD_KMALLOC_IN_
 	IMG_UINT32 uiFailedAllocFrequency;
 } PVR_TL_TEST_CMD_KMALLOC_IN;
 
+/****************************************************************************
+ * ZombiePMRCount IOCTL types
+ */
+
+#define PVR_TL_TEST_CMD_FLUSH_ZOMBIE_PMRS 40
+#define PVR_TL_TEST_CMD_ZOMBIE_PMR_COUNT  41
+
 #endif /* TUTILSDEFS_H */
 
 /******************************************************************************

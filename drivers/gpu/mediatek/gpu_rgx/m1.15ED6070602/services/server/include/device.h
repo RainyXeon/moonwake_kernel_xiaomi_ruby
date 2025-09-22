@@ -152,17 +152,12 @@ typedef struct _PG_HANDLE_
 } PG_HANDLE;
 
 #define MMU_BAD_PHYS_ADDR (0xbadbad00badULL)
-#define DUMMY_PAGE	("DUMMY_PAGE")
-#define DEV_ZERO_PAGE	("DEV_ZERO_PAGE")
-#define PVR_DUMMY_PAGE_INIT_VALUE	(0x0)
-#define PVR_ZERO_PAGE_INIT_VALUE	(0x0)
 
 typedef struct __DEFAULT_PAGE__
 {
 	/*Page handle for the page allocated (UMA/LMA)*/
 	PG_HANDLE	sPageHandle;
 	POS_LOCK	psPgLock;
-	ATOMIC_T	atRefCounter;
 	/*Default page size in terms of log2 */
 	IMG_UINT32	ui32Log2PgSize;
 	IMG_UINT64	ui64PgPhysAddr;
@@ -177,6 +172,7 @@ typedef enum _PVRSRV_DEVICE_STATE_
 	PVRSRV_DEVICE_STATE_INIT,
 	PVRSRV_DEVICE_STATE_ACTIVE,
 	PVRSRV_DEVICE_STATE_DEINIT,
+	PVRSRV_DEVICE_STATE_DESTRUCTING,
 	PVRSRV_DEVICE_STATE_BAD,
 } PVRSRV_DEVICE_STATE;
 
@@ -262,6 +258,10 @@ typedef struct _PVRSRV_DEVICE_NODE_
 	POS_LOCK				hPowerLock;
 	IMG_PID                 uiPwrLockOwnerPID; /* Only valid between lock and corresponding unlock
 	                                              operations of hPowerLock */
+
+	IMG_UINT32              uiPowerOffCounter; /* Counts how many times the device has been powered
+	                                              off. Incremented in PVRSRVSetDeviceCurrentPowerState().*/
+	IMG_UINT32              uiPowerOffCounterNext; /* Value of next update to uiPowerOffCounter. */
 
 	/* current system device power state */
 	PVRSRV_SYS_POWER_STATE	eCurrentSysPowerState;
@@ -456,7 +456,9 @@ typedef struct _PVRSRV_DEVICE_NODE_
 	PVRSRV_DEF_PAGE			sDummyPage;
 	PVRSRV_DEF_PAGE			sDevZeroPage;
 
-	POSWR_LOCK				hMemoryContextPageFaultNotifyListLock;
+	/* Lock protects access to sMemoryContextPageFaultNotifyListHead and
+	 * per memory context DEVMEMINT_CTX::sProcessNotifyListHead lists. */
+	POSWR_LOCK				hPageFaultNotifyLock;
 	DLLIST_NODE				sMemoryContextPageFaultNotifyListHead;
 
 	/* System DMA capability */
@@ -505,6 +507,17 @@ typedef struct _PVRSRV_DEVICE_NODE_
 	IMG_UINT64              ui64nLISR;           /*!< Number of LISR calls seen */
 	IMG_UINT64              ui64nMISR;           /*!< Number of MISR calls made */
 #endif
+
+	IMG_UINT32              ui32RGXLog2Non4KPgSize; /* Page size of Non4k heap in log2 form */
+
+	DLLIST_NODE             sCleanupThreadWorkList; /*!< List of work for the cleanup thread associated with the device */
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+	/* Data for the deferred freeing of a PMR physical pages for a given device */
+	DLLIST_NODE             sPMRZombieList;       /*!< List of PMRs to free */
+	POS_LOCK                hPMRZombieListLock;   /*!< List lock */
+	IMG_UINT32              uiPMRZombieCount;     /*!< Number of elements in the list */
+	IMG_UINT32              uiPMRZombieCountInCleanup; /*!< Number of elements in cleanup items */
+#endif /* defined(SUPPORT_PMR_DEFERRED_FREE) */
 } PVRSRV_DEVICE_NODE;
 
 /*
@@ -524,6 +537,20 @@ PVRSRV_ERROR PVRSRVDevInitCompatCheck(PVRSRV_DEVICE_NODE *psDeviceNode);
 
 PVRSRV_ERROR RGXClientConnectCompatCheck_ClientAgainstFW(PVRSRV_DEVICE_NODE * psDeviceNode, IMG_UINT32 ui32ClientBuildOptions);
 
+
+/* Determines if a 32-bit `uiCurrent` counter advanced to or beyond
+ * `uiRequired` value. The function takes into consideration that the
+ * counter could have wrapped around. */
+static INLINE IMG_BOOL PVRSRVHasCounter32Advanced(IMG_UINT32 uiCurrent,
+                                                  IMG_UINT32 uiRequired)
+{
+	return uiCurrent >= uiRequired ?
+	    /* ... with the counter wrapped around ...
+	     * There can't be ~4 billion transactions completed, so consider wrapped */
+	    (((uiCurrent - uiRequired) > 0xF0000000UL) ? IMG_FALSE : IMG_TRUE) :
+	    /* There can't be ~4 billion transactions pending, so consider wrapped */
+	    (((uiRequired - uiCurrent) > 0xF0000000UL) ? IMG_TRUE : IMG_FALSE);
+}
 
 #endif /* DEVICE_H */
 

@@ -88,7 +88,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_notifier.h"
 #include "pvrsrv_error.h"
 #include "servicesext.h"
-
+#include "sync_prim_internal.h"
 
 /*!
 	The level of the MMU
@@ -292,6 +292,31 @@ typedef struct _MMU_PAGESIZECONFIG_
 } MMU_PAGESIZECONFIG;
 
 /*************************************************************************/ /*!
+@Function       MMU_InitDevice
+
+@Description    Creates MMU device specific resources.
+
+@Input          psDevNode               Device node of the device to create the
+                                        MMU context for
+
+@Return         PVRSRV_OK if the initialisation process was successful
+*/
+/*****************************************************************************/
+PVRSRV_ERROR MMU_InitDevice(struct _PVRSRV_DEVICE_NODE_ *psDevNode);
+
+/*************************************************************************/ /*!
+@Function       MMU_DeInitDevice
+
+@Description    Clean-up MMU device specific resources.
+
+@Input          psDevNode               Device node of the device
+
+@Return         None
+*/
+/*****************************************************************************/
+void MMU_DeInitDevice(struct _PVRSRV_DEVICE_NODE_ *psDevNode);
+
+/*************************************************************************/ /*!
 @Function       MMU_ContextCreate
 
 @Description    Create a new MMU context
@@ -425,7 +450,9 @@ MMU_MapPages(MMU_CONTEXT *psMMUContext,
 
 @Input          psMMUContext            MMU context to operate on
 
-@Input          uiMappingFlags          Memalloc flags for the mapping
+@Input          uiMappingFlags          Memalloc flags for the unmapping
+                                        May use the sparse / zero backing pages
+                                        if given the flags, otherwise unmap.
 
 @Input          sDevVAddr               Device virtual address of the 1st page
 
@@ -435,21 +462,16 @@ MMU_MapPages(MMU_CONTEXT *psMMUContext,
 
 @Input          uiLog2PageSize          log2 size of the page
 
-
-@Input          uiMemAllocFlags         Indicates if the unmapped regions need
-                                        to be backed by dummy or zero page
-
-@Return         None
+@Return         PVRSRV_OK if the unmap operation was successful
 */
 /*****************************************************************************/
-void
+PVRSRV_ERROR
 MMU_UnmapPages(MMU_CONTEXT *psMMUContext,
                PVRSRV_MEMALLOCFLAGS_T uiMappingFlags,
                IMG_DEV_VIRTADDR sDevVAddr,
                IMG_UINT32 ui32PageCount,
                IMG_UINT32 *pai32UnmapIndicies,
-               IMG_UINT32 uiLog2PageSize,
-               PVRSRV_MEMALLOCFLAGS_T uiMemAllocFlags);
+               IMG_UINT32 uiLog2PageSize);
 
 /*************************************************************************/ /*!
 @Function       MMU_MapPMRFast
@@ -475,7 +497,7 @@ MMU_UnmapPages(MMU_CONTEXT *psMMUContext,
 PVRSRV_ERROR
 MMU_MapPMRFast(MMU_CONTEXT *psMMUContext,
                IMG_DEV_VIRTADDR sDevVAddr,
-               const PMR *psPMR,
+               PMR *psPMR,
                IMG_DEVMEM_SIZE_T uiSizeBytes,
                PVRSRV_MEMALLOCFLAGS_T uiMappingFlags,
                IMG_UINT32 uiLog2PageSize);
@@ -494,10 +516,10 @@ MMU_MapPMRFast(MMU_CONTEXT *psMMUContext,
 
 @Input          uiLog2PageSize          log2 size of the page
 
-@Return         None
+@Return         PVRSRV_OK if the PMR was successfully unmapped
 */
 /*****************************************************************************/
-void
+PVRSRV_ERROR
 MMU_UnmapPMRFast(MMU_CONTEXT *psMMUContext,
                  IMG_DEV_VIRTADDR sDevVAddrBase,
                  IMG_UINT32 ui32PageCount,
@@ -628,18 +650,17 @@ void MMU_GetOSids(MMU_CONTEXT *psMMUContext, IMG_UINT32 * pui32OSid,
 void MMU_AppendCacheFlags(MMU_CONTEXT *psMMUContext, IMG_UINT32 ui32NewCacheFlags);
 
 /*************************************************************************/ /*!
-@Function       MMU_ExchangeCacheFlags
+@Function       MMU_GetAndResetCacheFlags
 
-@Description    Exchange MMU context flags with specified value, atomically.
+@Description    Clears MMU context flags, atomically.
 
 @Input          psMMUContext            MMU context
-
-@Input          ui32CacheFlags          Cache flags to set.
 
 @Return         Previous MMU context cache flags.
 */
 /*****************************************************************************/
-IMG_UINT32 MMU_ExchangeCacheFlags(MMU_CONTEXT *psMMUContext, IMG_UINT32 ui32NewCacheFlags);
+IMG_UINT32 MMU_GetAndResetCacheFlags(MMU_CONTEXT *psMMUContext);
+
 
 /*************************************************************************/ /*!
 @Function       MMU_CheckFaultAddress
@@ -770,5 +791,25 @@ MMU_PDumpWritePageCatBase(MMU_CONTEXT *psMMUContext,
 	PVR_UNREFERENCED_PARAMETER(uiPdumpFlags);
 }
 #endif /* PDUMP */
+
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+/*************************************************************************/ /*!
+@Function       MMU_CacheInvalidateKick
+
+@Description    Kicks the Firmware to invalidate cashes
+
+@Input          psDeviceNode            Pointer to the device node
+@Output         puiRequiredSyncValue    Value the associated sync prim will be
+                                        updated to after the kick is finished
+                                        (parameter ignored if NULL)
+
+@Return         PVRSRV_OK if successful
+*/
+/*****************************************************************************/
+PVRSRV_ERROR MMU_CacheInvalidateKick(PPVRSRV_DEVICE_NODE psDeviceNode,
+                                     IMG_UINT32 *puiRequiredSyncValue);
+#endif /* defined(SUPPORT_PMR_DEFERRED_FREE) */
+
+void RGXMapBRN71422TargetPhysicalAddress(MMU_CONTEXT *psMMUContext);
 
 #endif /* #ifdef MMU_COMMON_H */

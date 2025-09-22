@@ -8,6 +8,7 @@
 #include <linux/wait.h>
 
 #include <net/inet_common.h>
+#include <net/tls.h>
 
 static bool tcp_bpf_stream_read(const struct sock *sk)
 {
@@ -39,17 +40,19 @@ static int tcp_bpf_wait_data(struct sock *sk, struct sk_psock *psock,
 }
 
 int __tcp_bpf_recvmsg(struct sock *sk, struct sk_psock *psock,
-		      struct msghdr *msg, int len)
+		      struct msghdr *msg, int len, int flags)
 {
 	struct iov_iter *iter = &msg->msg_iter;
+	int peek = flags & MSG_PEEK;
 	int i, ret, copied = 0;
+	struct sk_msg *msg_rx;
+
+	msg_rx = list_first_entry_or_null(&psock->ingress_msg,
+					  struct sk_msg, list);
 
 	while (copied != len) {
 		struct scatterlist *sge;
-		struct sk_msg *msg_rx;
 
-		msg_rx = list_first_entry_or_null(&psock->ingress_msg,
-						  struct sk_msg, list);
 		if (unlikely(!msg_rx))
 			break;
 
@@ -70,20 +73,29 @@ int __tcp_bpf_recvmsg(struct sock *sk, struct sk_psock *psock,
 			}
 
 			copied += copy;
-			sge->offset += copy;
-			sge->length -= copy;
-			sk_mem_uncharge(sk, copy);
-			if (!sge->length) {
-				i++;
-				if (i == MAX_SKB_FRAGS)
-					i = 0;
-				if (!msg_rx->skb)
-					put_page(page);
+			if (likely(!peek)) {
+				sge->offset += copy;
+				sge->length -= copy;
+				sk_mem_uncharge(sk, copy);
+				msg_rx->sg.size -= copy;
+
+				if (!sge->length) {
+					sk_msg_iter_var_next(i);
+					if (!msg_rx->skb)
+						put_page(page);
+				}
+			} else {
+				sk_msg_iter_var_next(i);
 			}
 
 			if (copied == len)
 				break;
 		} while (i != msg_rx->sg.end);
+
+		if (unlikely(peek)) {
+			msg_rx = list_next_entry(msg_rx, list);
+			continue;
+		}
 
 		msg_rx->sg.start = i;
 		if (!sge->length && msg_rx->sg.start == msg_rx->sg.end) {
@@ -92,6 +104,8 @@ int __tcp_bpf_recvmsg(struct sock *sk, struct sk_psock *psock,
 				consume_skb(msg_rx->skb);
 			kfree(msg_rx);
 		}
+		msg_rx = list_first_entry_or_null(&psock->ingress_msg,
+						  struct sk_msg, list);
 	}
 
 	return copied;
@@ -114,7 +128,7 @@ int tcp_bpf_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		return tcp_recvmsg(sk, msg, len, nonblock, flags, addr_len);
 	lock_sock(sk);
 msg_bytes_ready:
-	copied = __tcp_bpf_recvmsg(sk, psock, msg, len);
+	copied = __tcp_bpf_recvmsg(sk, psock, msg, len, flags);
 	if (!copied) {
 		int data, err = 0;
 		long timeo;
@@ -204,6 +218,8 @@ static int tcp_bpf_push(struct sock *sk, struct sk_msg *msg, u32 apply_bytes,
 	u32 off;
 
 	while (1) {
+		bool has_tx_ulp;
+
 		sge = sk_msg_elem(msg, msg->sg.start);
 		size = (apply && apply_bytes < sge->length) ?
 			apply_bytes : sge->length;
@@ -212,7 +228,15 @@ static int tcp_bpf_push(struct sock *sk, struct sk_msg *msg, u32 apply_bytes,
 
 		tcp_rate_check_app_limited(sk);
 retry:
-		ret = do_tcp_sendpages(sk, page, off, size, flags);
+		has_tx_ulp = tls_sw_has_ctx_tx(sk);
+		if (has_tx_ulp) {
+			flags |= MSG_SENDPAGE_NOPOLICY;
+			ret = kernel_sendpage_locked(sk,
+						     page, off, size, flags);
+		} else {
+			ret = do_tcp_sendpages(sk, page, off, size, flags);
+		}
+
 		if (ret <= 0)
 			return ret;
 		if (apply)
@@ -273,14 +297,22 @@ EXPORT_SYMBOL_GPL(tcp_bpf_sendmsg_redir);
 static int tcp_bpf_send_verdict(struct sock *sk, struct sk_psock *psock,
 				struct sk_msg *msg, int *copied, int flags)
 {
-	bool cork = false, enospc = msg->sg.start == msg->sg.end;
+	bool cork = false, enospc = sk_msg_full(msg);
 	struct sock *sk_redir;
-	u32 tosend;
+	u32 tosend, delta = 0;
 	int ret;
 
 more_data:
-	if (psock->eval == __SK_NONE)
+	if (psock->eval == __SK_NONE) {
+		/* Track delta in msg size to add/subtract it on SK_DROP from
+		 * returned to user copied size. This ensures user doesn't
+		 * get a positive return code with msg_cut_data and SK_DROP
+		 * verdict.
+		 */
+		delta = msg->sg.size;
 		psock->eval = sk_psock_msg_verdict(sk, psock, msg);
+		delta -= msg->sg.size;
+	}
 
 	if (msg->cork_bytes &&
 	    msg->cork_bytes > msg->sg.size && !enospc) {
@@ -336,7 +368,7 @@ more_data:
 	default:
 		sk_msg_free_partial(sk, msg, tosend);
 		sk_msg_apply_bytes(psock, tosend);
-		*copied -= tosend;
+		*copied -= (tosend + delta);
 		return -EACCES;
 	}
 
@@ -488,59 +520,7 @@ out_err:
 	return copied ? copied : err;
 }
 
-static void tcp_bpf_remove(struct sock *sk, struct sk_psock *psock)
-{
-	struct sk_psock_link *link;
-
-	sk_psock_cork_free(psock);
-	__sk_psock_purge_ingress_msg(psock);
-	while ((link = sk_psock_link_pop(psock))) {
-		sk_psock_unlink(sk, link);
-		sk_psock_free_link(link);
-	}
-}
-
-static void tcp_bpf_unhash(struct sock *sk)
-{
-	void (*saved_unhash)(struct sock *sk);
-	struct sk_psock *psock;
-
-	rcu_read_lock();
-	psock = sk_psock(sk);
-	if (unlikely(!psock)) {
-		rcu_read_unlock();
-		if (sk->sk_prot->unhash)
-			sk->sk_prot->unhash(sk);
-		return;
-	}
-
-	saved_unhash = psock->saved_unhash;
-	tcp_bpf_remove(sk, psock);
-	rcu_read_unlock();
-	saved_unhash(sk);
-}
-
-static void tcp_bpf_close(struct sock *sk, long timeout)
-{
-	void (*saved_close)(struct sock *sk, long timeout);
-	struct sk_psock *psock;
-
-	lock_sock(sk);
-	rcu_read_lock();
-	psock = sk_psock(sk);
-	if (unlikely(!psock)) {
-		rcu_read_unlock();
-		release_sock(sk);
-		return sk->sk_prot->close(sk, timeout);
-	}
-
-	saved_close = psock->saved_close;
-	tcp_bpf_remove(sk, psock);
-	rcu_read_unlock();
-	release_sock(sk);
-	saved_close(sk, timeout);
-}
-
+#ifdef CONFIG_BPF_STREAM_PARSER
 enum {
 	TCP_BPF_IPV4,
 	TCP_BPF_IPV6,
@@ -561,8 +541,9 @@ static void tcp_bpf_rebuild_protos(struct proto prot[TCP_BPF_NUM_CFGS],
 				   struct proto *base)
 {
 	prot[TCP_BPF_BASE]			= *base;
-	prot[TCP_BPF_BASE].unhash		= tcp_bpf_unhash;
-	prot[TCP_BPF_BASE].close		= tcp_bpf_close;
+	prot[TCP_BPF_BASE].unhash		= sock_map_unhash;
+	prot[TCP_BPF_BASE].destroy		= sock_map_destroy;
+	prot[TCP_BPF_BASE].close		= sock_map_close;
 	prot[TCP_BPF_BASE].recvmsg		= tcp_bpf_recvmsg;
 	prot[TCP_BPF_BASE].stream_memory_read	= tcp_bpf_stream_read;
 
@@ -591,26 +572,6 @@ static int __init tcp_bpf_v4_build_proto(void)
 }
 core_initcall(tcp_bpf_v4_build_proto);
 
-static void tcp_bpf_update_sk_prot(struct sock *sk, struct sk_psock *psock)
-{
-	int family = sk->sk_family == AF_INET6 ? TCP_BPF_IPV6 : TCP_BPF_IPV4;
-	int config = psock->progs.msg_parser   ? TCP_BPF_TX   : TCP_BPF_BASE;
-
-	sk_psock_update_proto(sk, psock, &tcp_bpf_prots[family][config]);
-}
-
-static void tcp_bpf_reinit_sk_prot(struct sock *sk, struct sk_psock *psock)
-{
-	int family = sk->sk_family == AF_INET6 ? TCP_BPF_IPV6 : TCP_BPF_IPV4;
-	int config = psock->progs.msg_parser   ? TCP_BPF_TX   : TCP_BPF_BASE;
-
-	/* Reinit occurs when program types change e.g. TCP_BPF_TX is removed
-	 * or added requiring sk_prot hook updates. We keep original saved
-	 * hooks in this case.
-	 */
-	sk->sk_prot = &tcp_bpf_prots[family][config];
-}
-
 static int tcp_bpf_assert_proto_ops(struct proto *ops)
 {
 	/* In order to avoid retpoline, we make assumptions when we call
@@ -622,34 +583,34 @@ static int tcp_bpf_assert_proto_ops(struct proto *ops)
 	       ops->sendpage == tcp_sendpage ? 0 : -ENOTSUPP;
 }
 
-void tcp_bpf_reinit(struct sock *sk)
+struct proto *tcp_bpf_get_proto(struct sock *sk, struct sk_psock *psock)
 {
-	struct sk_psock *psock;
+	int family = sk->sk_family == AF_INET6 ? TCP_BPF_IPV6 : TCP_BPF_IPV4;
+	int config = psock->progs.msg_parser   ? TCP_BPF_TX   : TCP_BPF_BASE;
 
-	sock_owned_by_me(sk);
+	if (!psock->sk_proto) {
+		struct proto *ops = READ_ONCE(sk->sk_prot);
 
-	rcu_read_lock();
-	psock = sk_psock(sk);
-	tcp_bpf_reinit_sk_prot(sk, psock);
-	rcu_read_unlock();
-}
+		if (tcp_bpf_assert_proto_ops(ops))
+			return ERR_PTR(-EINVAL);
 
-int tcp_bpf_init(struct sock *sk)
-{
-	struct proto *ops = READ_ONCE(sk->sk_prot);
-	struct sk_psock *psock;
-
-	sock_owned_by_me(sk);
-
-	rcu_read_lock();
-	psock = sk_psock(sk);
-	if (unlikely(!psock || psock->sk_proto ||
-		     tcp_bpf_assert_proto_ops(ops))) {
-		rcu_read_unlock();
-		return -EINVAL;
+		tcp_bpf_check_v6_needs_rebuild(sk, ops);
 	}
-	tcp_bpf_check_v6_needs_rebuild(sk, ops);
-	tcp_bpf_update_sk_prot(sk, psock);
-	rcu_read_unlock();
-	return 0;
+
+	return &tcp_bpf_prots[family][config];
 }
+
+/* If a child got cloned from a listening socket that had tcp_bpf
+ * protocol callbacks installed, we need to restore the callbacks to
+ * the default ones because the child does not inherit the psock state
+ * that tcp_bpf callbacks expect.
+ */
+void tcp_bpf_clone(const struct sock *sk, struct sock *newsk)
+{
+	int family = sk->sk_family == AF_INET6 ? TCP_BPF_IPV6 : TCP_BPF_IPV4;
+	struct proto *prot = newsk->sk_prot;
+
+	if (prot == &tcp_bpf_prots[family][TCP_BPF_BASE])
+		newsk->sk_prot = sk->sk_prot_creator;
+}
+#endif /* CONFIG_BPF_STREAM_PARSER */

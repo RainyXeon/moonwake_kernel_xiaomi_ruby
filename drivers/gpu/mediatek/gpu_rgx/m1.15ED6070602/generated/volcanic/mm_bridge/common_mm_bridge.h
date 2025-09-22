@@ -92,7 +92,17 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define PVRSRV_BRIDGE_MM_GETMAXDEVMEMSIZE			PVRSRV_BRIDGE_MM_CMD_FIRST+34
 #define PVRSRV_BRIDGE_MM_DEVMEMGETFAULTADDRESS			PVRSRV_BRIDGE_MM_CMD_FIRST+35
 #define PVRSRV_BRIDGE_MM_PVRSRVUPDATEOOMSTATS			PVRSRV_BRIDGE_MM_CMD_FIRST+36
-#define PVRSRV_BRIDGE_MM_CMD_LAST			(PVRSRV_BRIDGE_MM_CMD_FIRST+36)
+#define PVRSRV_BRIDGE_MM_DEVMEMINTHEAPCREATE2			PVRSRV_BRIDGE_MM_CMD_FIRST+37
+#define PVRSRV_BRIDGE_MM_DEVMEMXINTRESERVERANGE			PVRSRV_BRIDGE_MM_CMD_FIRST+38
+#define PVRSRV_BRIDGE_MM_DEVMEMXINTUNRESERVERANGE			PVRSRV_BRIDGE_MM_CMD_FIRST+39
+#define PVRSRV_BRIDGE_MM_DEVMEMXINTMAPPAGES			PVRSRV_BRIDGE_MM_CMD_FIRST+40
+#define PVRSRV_BRIDGE_MM_DEVMEMXINTUNMAPPAGES			PVRSRV_BRIDGE_MM_CMD_FIRST+41
+#define PVRSRV_BRIDGE_MM_CHANGESPARSEMEM2			PVRSRV_BRIDGE_MM_CMD_FIRST+42
+#define PVRSRV_BRIDGE_MM_DEVMEMINTRESERVERANGE2			PVRSRV_BRIDGE_MM_CMD_FIRST+43
+#define PVRSRV_BRIDGE_MM_DEVMEMINTUNRESERVERANGE2			PVRSRV_BRIDGE_MM_CMD_FIRST+44
+#define PVRSRV_BRIDGE_MM_DEVMEMINTMAPPMR2			PVRSRV_BRIDGE_MM_CMD_FIRST+45
+#define PVRSRV_BRIDGE_MM_DEVMEMINTUNMAPPMR2			PVRSRV_BRIDGE_MM_CMD_FIRST+46
+#define PVRSRV_BRIDGE_MM_CMD_LAST			(PVRSRV_BRIDGE_MM_CMD_FIRST+46)
 
 /*******************************************
             PMRExportPMR
@@ -777,5 +787,195 @@ typedef struct PVRSRV_BRIDGE_OUT_PVRSRVUPDATEOOMSTATS_TAG
 {
 	PVRSRV_ERROR eError;
 } __packed PVRSRV_BRIDGE_OUT_PVRSRVUPDATEOOMSTATS;
+
+/*******************************************
+            DevmemIntHeapCreate2
+ *******************************************/
+
+/* Bridge in structure for DevmemIntHeapCreate2 */
+typedef struct PVRSRV_BRIDGE_IN_DEVMEMINTHEAPCREATE2_TAG
+{
+	IMG_DEV_VIRTADDR sHeapBaseAddr;
+	IMG_DEVMEM_SIZE_T uiHeapLength;
+	IMG_HANDLE hDevmemCtx;
+	IMG_UINT32 ui32HeapConfigIndex;
+	IMG_UINT32 ui32HeapIndex;
+	IMG_UINT32 ui32Log2DataPageSize;
+} __packed PVRSRV_BRIDGE_IN_DEVMEMINTHEAPCREATE2;
+
+/* Bridge out structure for DevmemIntHeapCreate2 */
+typedef struct PVRSRV_BRIDGE_OUT_DEVMEMINTHEAPCREATE2_TAG
+{
+	IMG_HANDLE hDevmemHeapPtr;
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_DEVMEMINTHEAPCREATE2;
+
+/*******************************************
+            DevmemXIntReserveRange
+ *******************************************/
+
+/* Bridge in structure for DevmemXIntReserveRange */
+typedef struct PVRSRV_BRIDGE_IN_DEVMEMXINTRESERVERANGE_TAG
+{
+	IMG_DEV_VIRTADDR sAddress;
+	IMG_DEVMEM_SIZE_T uiLength;
+	IMG_HANDLE hDevmemServerHeap;
+} __packed PVRSRV_BRIDGE_IN_DEVMEMXINTRESERVERANGE;
+
+/* Bridge out structure for DevmemXIntReserveRange */
+typedef struct PVRSRV_BRIDGE_OUT_DEVMEMXINTRESERVERANGE_TAG
+{
+	IMG_HANDLE hReservation;
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_DEVMEMXINTRESERVERANGE;
+
+/*******************************************
+            DevmemXIntUnreserveRange
+ *******************************************/
+
+/* Bridge in structure for DevmemXIntUnreserveRange */
+typedef struct PVRSRV_BRIDGE_IN_DEVMEMXINTUNRESERVERANGE_TAG
+{
+	IMG_HANDLE hReservation;
+} __packed PVRSRV_BRIDGE_IN_DEVMEMXINTUNRESERVERANGE;
+
+/* Bridge out structure for DevmemXIntUnreserveRange */
+typedef struct PVRSRV_BRIDGE_OUT_DEVMEMXINTUNRESERVERANGE_TAG
+{
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_DEVMEMXINTUNRESERVERANGE;
+
+/*******************************************
+            DevmemXIntMapPages
+ *******************************************/
+
+/* Bridge in structure for DevmemXIntMapPages */
+typedef struct PVRSRV_BRIDGE_IN_DEVMEMXINTMAPPAGES_TAG
+{
+	IMG_HANDLE hPMR;
+	IMG_HANDLE hReservation;
+	IMG_UINT32 ui32PageCount;
+	IMG_UINT32 ui32PhysPageOffset;
+	IMG_UINT32 ui32VirtPageOffset;
+	PVRSRV_MEMALLOCFLAGS_T uiFlags;
+} __packed PVRSRV_BRIDGE_IN_DEVMEMXINTMAPPAGES;
+
+/* Bridge out structure for DevmemXIntMapPages */
+typedef struct PVRSRV_BRIDGE_OUT_DEVMEMXINTMAPPAGES_TAG
+{
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_DEVMEMXINTMAPPAGES;
+
+/*******************************************
+            DevmemXIntUnmapPages
+ *******************************************/
+
+/* Bridge in structure for DevmemXIntUnmapPages */
+typedef struct PVRSRV_BRIDGE_IN_DEVMEMXINTUNMAPPAGES_TAG
+{
+	IMG_HANDLE hReservation;
+	IMG_UINT32 ui32PageCount;
+	IMG_UINT32 ui32VirtPageOffset;
+} __packed PVRSRV_BRIDGE_IN_DEVMEMXINTUNMAPPAGES;
+
+/* Bridge out structure for DevmemXIntUnmapPages */
+typedef struct PVRSRV_BRIDGE_OUT_DEVMEMXINTUNMAPPAGES_TAG
+{
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_DEVMEMXINTUNMAPPAGES;
+
+/*******************************************
+            ChangeSparseMem2
+ *******************************************/
+
+/* Bridge in structure for ChangeSparseMem2 */
+typedef struct PVRSRV_BRIDGE_IN_CHANGESPARSEMEM2_TAG
+{
+	IMG_UINT64 ui64CPUVAddr;
+	IMG_HANDLE hPMR;
+	IMG_HANDLE hReservation;
+	IMG_HANDLE hSrvDevMemHeap;
+	IMG_UINT32 * pui32AllocPageIndices;
+	IMG_UINT32 * pui32FreePageIndices;
+	IMG_UINT32 ui32AllocPageCount;
+	IMG_UINT32 ui32FreePageCount;
+	IMG_UINT32 ui32SparseFlags;
+} __packed PVRSRV_BRIDGE_IN_CHANGESPARSEMEM2;
+
+/* Bridge out structure for ChangeSparseMem2 */
+typedef struct PVRSRV_BRIDGE_OUT_CHANGESPARSEMEM2_TAG
+{
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_CHANGESPARSEMEM2;
+
+/*******************************************
+            DevmemIntReserveRange2
+ *******************************************/
+
+/* Bridge in structure for DevmemIntReserveRange2 */
+typedef struct PVRSRV_BRIDGE_IN_DEVMEMINTRESERVERANGE2_TAG
+{
+	IMG_DEV_VIRTADDR sAddress;
+	IMG_DEVMEM_SIZE_T uiLength;
+	IMG_HANDLE hDevmemServerHeap;
+	PVRSRV_MEMALLOCFLAGS_T uiFlags;
+} __packed PVRSRV_BRIDGE_IN_DEVMEMINTRESERVERANGE2;
+
+/* Bridge out structure for DevmemIntReserveRange2 */
+typedef struct PVRSRV_BRIDGE_OUT_DEVMEMINTRESERVERANGE2_TAG
+{
+	IMG_HANDLE hReservation;
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_DEVMEMINTRESERVERANGE2;
+
+/*******************************************
+            DevmemIntUnreserveRange2
+ *******************************************/
+
+/* Bridge in structure for DevmemIntUnreserveRange2 */
+typedef struct PVRSRV_BRIDGE_IN_DEVMEMINTUNRESERVERANGE2_TAG
+{
+	IMG_HANDLE hReservation;
+} __packed PVRSRV_BRIDGE_IN_DEVMEMINTUNRESERVERANGE2;
+
+/* Bridge out structure for DevmemIntUnreserveRange2 */
+typedef struct PVRSRV_BRIDGE_OUT_DEVMEMINTUNRESERVERANGE2_TAG
+{
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_DEVMEMINTUNRESERVERANGE2;
+
+/*******************************************
+            DevmemIntMapPMR2
+ *******************************************/
+
+/* Bridge in structure for DevmemIntMapPMR2 */
+typedef struct PVRSRV_BRIDGE_IN_DEVMEMINTMAPPMR2_TAG
+{
+	IMG_HANDLE hDevmemServerHeap;
+	IMG_HANDLE hPMR;
+	IMG_HANDLE hReservation;
+} __packed PVRSRV_BRIDGE_IN_DEVMEMINTMAPPMR2;
+
+/* Bridge out structure for DevmemIntMapPMR2 */
+typedef struct PVRSRV_BRIDGE_OUT_DEVMEMINTMAPPMR2_TAG
+{
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_DEVMEMINTMAPPMR2;
+
+/*******************************************
+            DevmemIntUnmapPMR2
+ *******************************************/
+
+/* Bridge in structure for DevmemIntUnmapPMR2 */
+typedef struct PVRSRV_BRIDGE_IN_DEVMEMINTUNMAPPMR2_TAG
+{
+	IMG_HANDLE hReservation;
+} __packed PVRSRV_BRIDGE_IN_DEVMEMINTUNMAPPMR2;
+
+/* Bridge out structure for DevmemIntUnmapPMR2 */
+typedef struct PVRSRV_BRIDGE_OUT_DEVMEMINTUNMAPPMR2_TAG
+{
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_DEVMEMINTUNMAPPMR2;
 
 #endif /* COMMON_MM_BRIDGE_H */

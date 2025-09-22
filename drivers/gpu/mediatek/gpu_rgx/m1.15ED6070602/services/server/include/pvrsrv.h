@@ -141,9 +141,10 @@ typedef struct PVRSRV_DATA_TAG
 	IMG_HANDLE            hCleanupThread;                 /*!< Cleanup thread */
 	IMG_HANDLE            hCleanupEventObject;            /*!< Event object to drive cleanup thread */
 	POS_SPINLOCK          hCleanupThreadWorkListLock;     /*!< Lock protecting the cleanup thread work list */
-	DLLIST_NODE           sCleanupThreadWorkList;         /*!< List of work for the cleanup thread */
 	IMG_PID               cleanupThreadPid;               /*!< Cleanup thread process id */
-	ATOMIC_T              i32NumCleanupItems;             /*!< Number of items in cleanup thread work list */
+	ATOMIC_T              i32NumCleanupItemsQueued;       /*!< Number of items in cleanup thread work list */
+	ATOMIC_T              i32NumCleanupItemsNotCompleted; /*!< Number of items dropped from cleanup thread work list
+	                                                           after retry limit reached */
 
 	IMG_HANDLE            hDevicesWatchdogThread;         /*!< Devices watchdog thread */
 	IMG_HANDLE            hDevicesWatchdogEvObj;          /*! Event object to drive devices watchdog thread */

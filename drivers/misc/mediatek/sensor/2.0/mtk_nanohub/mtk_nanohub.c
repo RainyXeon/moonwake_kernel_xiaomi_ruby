@@ -364,7 +364,7 @@ static void mtk_nanohub_moving_average(union SCP_SENSOR_HUB_DATA *rsp)
 	 *		return;
 	 *}
 	 */
-	ap_now_time = ktime_get_boot_ns();
+	ap_now_time = ktime_get_boottime_ns();
 	arch_counter = arch_counter_get_cntvct();
 	scp_raw_time = rsp->notify_rsp.scp_timestamp;
 	ipi_transfer_time = arch_counter_to_ns(arch_counter -
@@ -1022,7 +1022,7 @@ static int mtk_nanohub_send_timestamp_wake_locked(void)
 
 	/* send_timestamp_to_hub is process context, disable irq is safe */
 	local_irq_disable();
-	now_time = ktime_get_boot_ns();
+	now_time = ktime_get_boottime_ns();
 	arch_counter = arch_counter_get_cntvct();
 	local_irq_enable();
 	req.set_config_req.sensorType = 0;
@@ -2937,7 +2937,7 @@ static int mtk_nanohub_pm_event(struct notifier_block *notifier,
 {
 	switch (pm_event) {
 	case PM_POST_SUSPEND:
-		pr_debug("resume ap boottime=%lld\n", ktime_get_boot_ns());
+		pr_debug("resume ap boottime=%lld\n", ktime_get_boottime_ns());
 		WRITE_ONCE(rtc_compensation_suspend, false);
 		//Added to send flush command to light sensor.
 		pr_info("mtk_nanohub_pm_event calls Light_flush\n");
@@ -2945,7 +2945,7 @@ static int mtk_nanohub_pm_event(struct notifier_block *notifier,
 		mtk_nanohub_send_timestamp_to_hub();
 		return NOTIFY_DONE;
 	case PM_SUSPEND_PREPARE:
-		pr_debug("suspend ap boottime=%lld\n", ktime_get_boot_ns());
+		pr_debug("suspend ap boottime=%lld\n", ktime_get_boottime_ns());
 		WRITE_ONCE(rtc_compensation_suspend, true);
 		return NOTIFY_DONE;
 	default:
