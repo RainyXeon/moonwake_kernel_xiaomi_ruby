@@ -1037,25 +1037,29 @@ static struct mount *skip_mnt_tree(struct mount *p)
 struct vfsmount *vfs_create_mount(struct fs_context *fc)
 {
 	struct mount *mnt;
-	struct dentry *root;
+	struct super_block *sb;
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	struct mount *m;
 	struct mnt_namespace *mnt_ns;
 	int mnt_id;
 #endif
-	if (!type)
-		return ERR_PTR(-ENODEV);
+
+	if (!fc->root)
+		return ERR_PTR(-EINVAL);
+	sb = fc->root->d_sb;
+
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	// For newly created mounts, the only caller process we care is KSU
 	if (unlikely(susfs_is_current_ksu_domain())) {
-		mnt = alloc_vfsmnt(name, true, 0);
+		mnt = alloc_vfsmnt(fc->source ?: "none", true, 0);
 		goto bypass_orig_flow;
 	}
-	mnt = alloc_vfsmnt(name, false, 0);
+	mnt = alloc_vfsmnt(fc->source ?: "none", false, 0);
 bypass_orig_flow:
 #else
-	mnt = alloc_vfsmnt(name);
+	mnt = alloc_vfsmnt(fc->source ?: "none");
 #endif
+
 	if (!mnt)
 		return ERR_PTR(-ENOMEM);
 
@@ -1077,12 +1081,6 @@ bypass_orig_flow:
 	mnt->mnt.mnt_root	= dget(fc->root);
 	mnt->mnt_mountpoint	= mnt->mnt.mnt_root;
 	mnt->mnt_parent		= mnt;
-
-<<<<<<< HEAD
-	mnt->mnt.mnt_root = root;
-	mnt->mnt.mnt_sb = root->d_sb;
-	mnt->mnt_mountpoint = mnt->mnt.mnt_root;
-	mnt->mnt_parent = mnt;
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	// - If caller process is zygote, then it is a normal mount, so we calculate the next available 
 	//   fake mnt_id for this mount
@@ -1104,8 +1102,6 @@ bypass_orig_flow:
 		}
 	}
 #endif
-=======
->>>>>>> ben/android-4.19.y-mediatek
 	lock_mount_hash();
 	list_add_tail(&mnt->mnt_instance, &mnt->mnt.mnt_sb->s_mounts);
 	unlock_mount_hash();
