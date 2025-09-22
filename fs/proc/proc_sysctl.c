@@ -597,12 +597,6 @@ static ssize_t proc_sys_call_handler(struct kiocb *iocb, struct iov_iter *iter,
 	if (!table->proc_handler)
 		goto out;
 
-<<<<<<< HEAD
-	error = BPF_CGROUP_RUN_PROG_SYSCTL(head, table, write);
-	if (error)
-		goto out;
-
-=======
 	/* don't even try if the size is too large */
 	error = -ENOMEM;
 	if (count >= KMALLOC_MAX_SIZE)
@@ -623,7 +617,6 @@ static ssize_t proc_sys_call_handler(struct kiocb *iocb, struct iov_iter *iter,
 	if (error)
 		goto out_free_buf;
 
->>>>>>> ben/android-4.19.y-mediatek
 	/* careful: calling conventions are nasty here */
 	error = table->proc_handler(table, write, kbuf, &count, &iocb->ki_pos);
 	if (error)
