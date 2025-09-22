@@ -81,10 +81,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_ricommon.h"
 #include "pvrsrv_apphint.h"
 #include "oskm_apphint.h"
+#include "srvcore.h"
 #if defined(__linux__)
 #include "linux/kernel.h"
 #endif
 #else
+#include "srvcore_intern.h"
 #include "rgxdefs.h"
 #endif
 
@@ -311,7 +313,7 @@ DeviceMemChangeSparse(DEVMEM_MEMDESC *psMemDesc,
 	IMG_HANDLE hPMR;
 	IMG_HANDLE hSrvDevMemHeap;
 	POS_LOCK hLock;
-	IMG_DEV_VIRTADDR sDevVAddr;
+	IMG_HANDLE hReservation;
 	IMG_CPU_VIRTADDR pvCpuVAddr;
 	DEVMEM_PROPERTIES_T uiProperties;
 
@@ -324,7 +326,7 @@ DeviceMemChangeSparse(DEVMEM_MEMDESC *psMemDesc,
 	hDevConnection = psImport->hDevConnection;
 	hPMR = psImport->hPMR;
 	hLock = psImport->hLock;
-	sDevVAddr = psImport->sDeviceImport.sDevVAddr;
+	hReservation = psImport->sDeviceImport.hReservation;
 	pvCpuVAddr = psImport->sCPUImport.pvCPUVAddr;
 
 	if (NULL == hDevConnection)
@@ -339,7 +341,7 @@ DeviceMemChangeSparse(DEVMEM_MEMDESC *psMemDesc,
 		goto e0;
 	}
 
-	if ((uiSparseFlags & SPARSE_RESIZE_BOTH) && (0 == sDevVAddr.uiAddr))
+	if ((uiSparseFlags & SPARSE_RESIZE_BOTH) && (hReservation == LACK_OF_RESERVATION_POISON))
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: Invalid Device Virtual Map", __func__));
 		goto e0;
@@ -383,21 +385,43 @@ DeviceMemChangeSparse(DEVMEM_MEMDESC *psMemDesc,
 	}
 #endif
 
+	/* If we got here the validation check above for hReservation was successful
+	 * meaning the memdesc must have been mapped. Therefore the psHeap is also
+	 * valid. */
+	PVR_ASSERT(psImport->sDeviceImport.psHeap != NULL);
+
 	hSrvDevMemHeap = psImport->sDeviceImport.psHeap->hDevMemServerHeap;
 
 	OSLockAcquire(hLock);
 
-	eError = BridgeChangeSparseMem(GetBridgeHandle(hDevConnection),
-			hSrvDevMemHeap,
-			hPMR,
-			ui32AllocPageCount,
-			paui32AllocPageIndices,
-			ui32FreePageCount,
-			pauiFreePageIndices,
-			uiSparseFlags,
-			psImport->uiFlags,
-			sDevVAddr,
-			(IMG_UINT64)((uintptr_t)pvCpuVAddr));
+	eError = BridgeChangeSparseMem2(GetBridgeHandle(hDevConnection),
+	                               hSrvDevMemHeap,
+	                               hPMR,
+	                               ui32AllocPageCount,
+	                               paui32AllocPageIndices,
+	                               ui32FreePageCount,
+	                               pauiFreePageIndices,
+	                               uiSparseFlags,
+	                               hReservation,
+	                               (IMG_UINT64) ((uintptr_t) pvCpuVAddr));
+	if (eError == PVRSRV_ERROR_BRIDGE_CALL_FAILED)
+	{
+		/* Try the original bridge function */
+		IMG_DEV_VIRTADDR sDevVAddr = psImport->sDeviceImport.sDevVAddr;
+		PVR_ASSERT(sDevVAddr.uiAddr != 0);
+
+		eError = BridgeChangeSparseMem(GetBridgeHandle(hDevConnection),
+	                               hSrvDevMemHeap,
+	                               hPMR,
+	                               ui32AllocPageCount,
+	                               paui32AllocPageIndices,
+	                               ui32FreePageCount,
+	                               pauiFreePageIndices,
+	                               uiSparseFlags,
+	                               psImport->uiFlags,
+	                               sDevVAddr,
+	                               (IMG_UINT64) ((uintptr_t) pvCpuVAddr));
+	}
 
 	OSLockRelease(hLock);
 
@@ -661,6 +685,7 @@ PopulateContextFromBlueprint(struct DEVMEM_CONTEXT_TAG *psCtx,
 				uiLog2ImportAlignment,
 				aszHeapName,
 				uiHeapBlueprintID,
+				uiHeapIndex,
 				&ppsHeapArray[uiHeapIndex]);
 		PVR_GOTO_IF_ERROR(eError, e1);
 
@@ -877,8 +902,10 @@ DevmemDestroyContext(DEVMEM_CONTEXT *psCtx)
 		goto e1;
 	}
 
-	eError = BridgeDevmemIntCtxDestroy(GetBridgeHandle(psCtx->hDevConnection),
-			psCtx->hDevMemServerContext);
+	eError = DestroyServerResource(psCtx->hDevConnection,
+	                               NULL,
+	                               BridgeDevmemIntCtxDestroy,
+	                               psCtx->hDevMemServerContext);
 	if (bDoCheck)
 	{
 		PVR_LOG_GOTO_IF_ERROR(eError, "BridgeDevMemIntCtxDestroy", e1);
@@ -995,6 +1022,7 @@ DevmemCreateHeap(DEVMEM_CONTEXT *psCtx,
 		IMG_UINT32 ui32Log2ImportAlignment,
 		const IMG_CHAR *pszName,
 		DEVMEM_HEAPCFGID uiHeapBlueprintID,
+		IMG_UINT32 uiHeapIndex,
 		DEVMEM_HEAP **ppsHeapPtr)
 {
 	PVRSRV_ERROR eError = PVRSRV_OK;
@@ -1009,11 +1037,11 @@ DevmemCreateHeap(DEVMEM_CONTEXT *psCtx,
 	IMG_CHAR *pszStr;
 	IMG_UINT32 ui32pszStrSize;
 
-	if (ppsHeapPtr == NULL ||
-	    uiReservedRegionLength % DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY)
-	{
-		PVR_GOTO_WITH_ERROR(eError, PVRSRV_ERROR_INVALID_PARAMS, e0);
-	}
+	PVR_LOG_RETURN_IF_INVALID_PARAM(ppsHeapPtr, "ppsHeapPtr");
+
+	/* Reserved VA space of a heap must always be multiple of DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY.
+	 * Granularity has been chosen to support the max possible practically used OS page size. */
+	PVR_LOG_RETURN_IF_INVALID_PARAM((uiReservedRegionLength % DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY) == 0, "uiReservedRegionLength");
 
 	ui32PolicyVMRA = RA_POLICY_DEFAULT;
 
@@ -1162,12 +1190,24 @@ DevmemCreateHeap(DEVMEM_CONTEXT *psCtx,
 
 
 	/* Create server-side counterpart of Device Memory heap */
-	eError = BridgeDevmemIntHeapCreate(GetBridgeHandle(psCtx->hDevConnection),
+	eError = BridgeDevmemIntHeapCreate2(GetBridgeHandle(psCtx->hDevConnection),
 			psCtx->hDevMemServerContext,
+			uiHeapBlueprintID,
+			uiHeapIndex,
 			sBaseAddress,
 			uiLength,
 			ui32Log2Quantum,
 			&hDevMemServerHeap);
+	/* Fix for UM/KM compatibility. */
+	if (eError == PVRSRV_ERROR_BRIDGE_CALL_FAILED)
+	{
+		eError = BridgeDevmemIntHeapCreate(GetBridgeHandle(psCtx->hDevConnection),
+										   psCtx->hDevMemServerContext,
+										   sBaseAddress,
+										   uiLength,
+										   ui32Log2Quantum,
+										   &hDevMemServerHeap);
+	}
 	PVR_GOTO_IF_ERROR(eError, e6);
 
 	psHeap->hDevMemServerHeap = hDevMemServerHeap;
@@ -1289,8 +1329,11 @@ DevmemDestroyHeap(DEVMEM_HEAP *psHeap)
 		}
 	}
 
-	eError = BridgeDevmemIntHeapDestroy(GetBridgeHandle(psHeap->psCtx->hDevConnection),
-			psHeap->hDevMemServerHeap);
+	eError = DestroyServerResource(psHeap->psCtx->hDevConnection,
+	                               NULL,
+	                               BridgeDevmemIntHeapDestroy,
+	                               psHeap->hDevMemServerHeap);
+
 #if defined(PVRSRV_FORCE_UNLOAD_IF_BAD_STATE)
 	if (bDoCheck)
 #endif
@@ -1854,7 +1897,10 @@ IMG_INTERNAL PVRSRV_ERROR
 DevmemUnmakeLocalImportHandle(SHARED_DEV_CONNECTION hDevConnection,
 		IMG_HANDLE hLocalImportHandle)
 {
-	return BridgePMRUnmakeLocalImportHandle(GetBridgeHandle(hDevConnection), hLocalImportHandle);
+	return DestroyServerResource(hDevConnection,
+	                             NULL,
+	                             BridgePMRUnmakeLocalImportHandle,
+	                             hLocalImportHandle);
 }
 
 /*****************************************************************************
@@ -1921,8 +1967,10 @@ _Mapping_Unexport(DEVMEM_IMPORT *psImport,
 
 	PVR_ASSERT (psImport != NULL);
 
-	eError = BridgePMRUnexportPMR(GetBridgeHandle(psImport->hDevConnection),
-			hPMRExportHandle);
+	eError = DestroyServerResource(psImport->hDevConnection,
+	                               NULL,
+	                               BridgePMRUnexportPMR,
+	                               hPMRExportHandle);
 	PVR_ASSERT(eError == PVRSRV_OK);
 }
 

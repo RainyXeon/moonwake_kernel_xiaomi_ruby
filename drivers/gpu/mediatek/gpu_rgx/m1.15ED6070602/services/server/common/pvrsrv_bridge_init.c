@@ -430,8 +430,9 @@ ServerBridgeDeInit(void)
 
 #if defined(SUPPORT_RGX)
 PVRSRV_ERROR
-DeviceDepBridgeInit(IMG_UINT64 ui64Features)
+DeviceDepBridgeInit(PVRSRV_RGXDEV_INFO *psDevInfo)
 {
+	IMG_UINT64 ui64Features = psDevInfo->sDevFeatureCfg.ui64Features;
 	PVRSRV_ERROR eError;
 
 #if defined(RGX_FEATURE_COMPUTE_BIT_MASK)
@@ -470,8 +471,9 @@ DeviceDepBridgeInit(IMG_UINT64 ui64Features)
 }
 
 PVRSRV_ERROR
-DeviceDepBridgeDeInit(IMG_UINT64 ui64Features)
+DeviceDepBridgeDeInit(PVRSRV_RGXDEV_INFO *psDevInfo)
 {
+	IMG_UINT64 ui64Features = psDevInfo->sDevFeatureCfg.ui64Features;
 	PVRSRV_ERROR eError;
 
 #if defined(RGX_FEATURE_COMPUTE_BIT_MASK)

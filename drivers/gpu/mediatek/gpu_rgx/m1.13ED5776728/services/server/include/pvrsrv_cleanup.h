@@ -44,6 +44,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define _PVRSRV_CLEANUP_H
 
 #include "dllist.h"
+#include "device.h"
 
 /**************************************************************************/ /*!
 @Brief          CLEANUP_THREAD_FN
@@ -150,10 +151,24 @@ typedef struct _PVRSRV_CLEANUP_THREAD_WORK_
 
 @Description    Add a work item to be called from the cleanup thread
 
-@Input          psData : The function pointer and private data for the callback
+@Input          psDevNode : Pointer to the device node
+@Input          psData :    The function pointer and private data for the
+                            callback
 
 @Return         None
 */ /***************************************************************************/
-void PVRSRVCleanupThreadAddWork(PVRSRV_CLEANUP_THREAD_WORK *psData);
+void PVRSRVCleanupThreadAddWork(PVRSRV_DEVICE_NODE *psDevNode,
+                                PVRSRV_CLEANUP_THREAD_WORK *psData);
+
+/**************************************************************************/ /*!
+@Function       PVRSRVCleanupThreadWaitForDevice
+
+@Description    Blocking wait for all of the device's items to be cleaned.
+
+@Input          psDevNode : Pointer to the device node
+
+@Return         None
+*/ /***************************************************************************/
+void PVRSRVCleanupThreadWaitForDevice(PVRSRV_DEVICE_NODE *psDevNode);
 
 #endif /* _PVRSRV_CLEANUP_H */

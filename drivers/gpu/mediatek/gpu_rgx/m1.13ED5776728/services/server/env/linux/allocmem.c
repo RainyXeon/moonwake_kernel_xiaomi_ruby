@@ -49,9 +49,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "img_defs.h"
 #include "allocmem.h"
 #include "pvr_debug.h"
-#if defined(PVRSRV_ENABLE_PROCESS_STATS)
 #include "process_stats.h"
-#endif
 #include "osfunc.h"
 
 /*

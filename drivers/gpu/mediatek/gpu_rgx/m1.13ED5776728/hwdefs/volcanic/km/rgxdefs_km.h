@@ -336,4 +336,18 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 #define RGX_SRV_SLC_RANGEBASED_CFI_SUPPORTED 1
 
+
+#if defined(FIX_HW_BRN_71422)
+/*
+ * The BRN71422 software workaround requires a target physical address on
+ * the hardware platform with a low latency response time and which will
+ * not suffer from delays of DRAM hardware operations such as refresh and
+ * recalibration. Only with that address defined will the workaround be used.
+ */
+#if !defined(PDUMP)
+//#define RGX_BRN71422_TARGET_HARDWARE_PHYSICAL_ADDR  (IMG_UINT64_C(0x0000000000))
+#endif
+#define RGX_BRN71422_WORKAROUND_READ_SIZE           (32U)
+#endif
+
 #endif /* RGXDEFS_KM_H */

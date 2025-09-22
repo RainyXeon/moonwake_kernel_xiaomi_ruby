@@ -40,7 +40,7 @@ static void test_work_func(struct work_struct *work)
 	ctrl->length = sizeof(*timesync);
 	timesync = (struct sensor_comm_timesync *)ctrl->data;
 	local_irq_disable();
-	timesync->host_timestamp = ktime_get_boot_ns();
+	timesync->host_timestamp = ktime_get_boottime_ns();
 	timesync->host_archcounter = arch_counter_get_cntvct();
 	local_irq_enable();
 	ret = sensor_comm_ctrl_send(ctrl, sizeof(*ctrl) + ctrl->length);

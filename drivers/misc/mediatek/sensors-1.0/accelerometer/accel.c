@@ -742,7 +742,7 @@ int acc_data_report(struct acc_data *data)
 	 */
 	if (event.reserved == 1)
 		mark_timestamp(ID_ACCELEROMETER, DATA_REPORT,
-			       ktime_get_boot_ns(), event.time_stamp);
+			       ktime_get_boottime_ns(), event.time_stamp);
 	err = sensor_input_event(acc_context_obj->mdev.minor, &event);
 	return err;
 }

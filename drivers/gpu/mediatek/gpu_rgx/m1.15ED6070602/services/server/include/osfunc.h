@@ -1648,6 +1648,16 @@ void OSDmaForceCleanup(PVRSRV_DEVICE_NODE *psDevNode, void *pvChan,
 					   void *pvOSData, IMG_HANDLE pvServerCleanupParam,
 					   PFN_SERVER_CLEANUP pfnServerCleanup);
 #endif
+#if defined(SUPPORT_SECURE_ALLOC_KM)
+PVRSRV_ERROR
+OSAllocateSecBuf(PVRSRV_DEVICE_NODE *psDeviceNode,
+				 IMG_DEVMEM_SIZE_T uiSize,
+				 const IMG_CHAR *pszName,
+				 PMR **ppsPMR);
+
+void
+OSFreeSecBuf(PMR *psPMR);
+#endif
 #endif /* OSFUNC_H */
 
 /******************************************************************************

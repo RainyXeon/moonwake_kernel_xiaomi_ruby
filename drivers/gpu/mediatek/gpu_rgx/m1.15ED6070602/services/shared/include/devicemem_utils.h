@@ -58,15 +58,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define DEVMEM_HEAPNAME_MAXLENGTH 160
 
 /*
- * Reserved VA space of a heap must always be multiple of DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY,
- * this check is validated in the DDK. Note this is only reserving "Virtual Address" space and
- * physical allocations (and mappings thereon) should only be done as much as required (to avoid
- * wastage).
- * Granularity has been chosen to support the max possible practically used OS page size.
- */
-#define DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY        0x10000 /* 64KB is MAX anticipated OS page size */
-
-/*
  * VA heap size should be at least OS page size. This check is validated in the DDK.
  */
 #define DEVMEM_HEAP_MINIMUM_SIZE                     0x10000 /* 64KB is MAX anticipated OS page size */

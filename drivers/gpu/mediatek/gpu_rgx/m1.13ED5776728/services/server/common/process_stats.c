@@ -58,6 +58,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "htbuffer.h"
 #include "pvr_ricommon.h"
 #include "di_server.h"
+#if defined(__linux__)
+#include "trace_events.h"
+#endif
 
 /* Enabled OS Statistics entries: DEBUGFS on Linux, undefined for other OSs */
 #if defined(LINUX) && ( \
@@ -66,6 +69,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 	defined(PVRSRV_ENABLE_MEMORY_STATS) || \
 	defined(PVRSRV_ENABLE_GPU_MEMORY_INFO) )
 #define ENABLE_DEBUGFS_PIDS
+#endif
+
+/* Enable GPU memory accounting tracepoint */
+#if defined(__linux__) && ( \
+	defined(CONFIG_TRACE_GPU_MEM) || defined(PVRSRV_ENABLE_GPU_MEM_TRACEPOINT) )
+#define ENABLE_GPU_MEM_TRACEPOINT
 #endif
 
 /*
@@ -109,8 +118,23 @@ int GlobalStatsPrintElements(OSDI_IMPL_ENTRY *psEntry, void *pvData);
  * by the gsGlobalStats.hGlobalStatsLock lock. This means all of the
  * invocations of macros *_GLOBAL_STAT_VALUE. */
 
-/* Macro for fetching stat values */
+/* Macros for fetching stat values */
+#define GET_STAT_VALUE(ptr,var) (ptr)->i32StatValue[(var)]
 #define GET_GLOBAL_STAT_VALUE(idx) gsGlobalStats.ui32StatValue[idx]
+
+#define GET_GPUMEM_GLOBAL_STAT_VALUE() \
+	GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ALLOC_PT_MEMORY_UMA) + \
+	GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ALLOC_PT_MEMORY_LMA) + \
+	GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ALLOC_GPUMEM_LMA) + \
+	GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ALLOC_GPUMEM_UMA) + \
+	GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_DMA_BUF_IMPORT)
+
+#define GET_GPUMEM_PERPID_STAT_VALUE(ptr) \
+	GET_STAT_VALUE((ptr), PVRSRV_PROCESS_STAT_TYPE_ALLOC_PAGES_PT_UMA) + \
+	GET_STAT_VALUE((ptr), PVRSRV_PROCESS_STAT_TYPE_ALLOC_PAGES_PT_LMA) + \
+	GET_STAT_VALUE((ptr), PVRSRV_PROCESS_STAT_TYPE_ALLOC_LMA_PAGES) + \
+	GET_STAT_VALUE((ptr), PVRSRV_PROCESS_STAT_TYPE_ALLOC_UMA_PAGES) + \
+	GET_STAT_VALUE((ptr), PVRSRV_PROCESS_STAT_TYPE_DMA_BUF_IMPORT)
 /*
  * Macros for updating stat values.
  */
@@ -1154,7 +1178,15 @@ PVRSRVStatsDestroyDI(void)
 static void _decrease_global_stat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 								  size_t uiBytes)
 {
+#if defined(ENABLE_GPU_MEM_TRACEPOINT)
+	IMG_UINT64 ui64InitialSize;
+#endif
+
 	OSLockAcquire(gsGlobalStats.hGlobalStatsLock);
+
+#if defined(ENABLE_GPU_MEM_TRACEPOINT)
+	ui64InitialSize = GET_GPUMEM_GLOBAL_STAT_VALUE();
+#endif
 
 	switch (eAllocType)
 	{
@@ -1186,9 +1218,21 @@ static void _decrease_global_stat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 			DECREASE_GLOBAL_STAT_VALUE(gsGlobalStats, PVRSRV_DRIVER_STAT_TYPE_ALLOC_GPUMEM_LMA, uiBytes);
 			break;
 
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+		case PVRSRV_MEM_ALLOC_TYPE_ZOMBIE_LMA_PAGES:
+			DECREASE_GLOBAL_STAT_VALUE(gsGlobalStats, PVRSRV_DRIVER_STAT_TYPE_ZOMBIE_GPUMEM_LMA, uiBytes);
+			break;
+#endif
+
 		case PVRSRV_MEM_ALLOC_TYPE_ALLOC_UMA_PAGES:
 			DECREASE_GLOBAL_STAT_VALUE(gsGlobalStats, PVRSRV_DRIVER_STAT_TYPE_ALLOC_GPUMEM_UMA, uiBytes);
 			break;
+
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+		case PVRSRV_MEM_ALLOC_TYPE_ZOMBIE_UMA_PAGES:
+			DECREASE_GLOBAL_STAT_VALUE(gsGlobalStats, PVRSRV_DRIVER_STAT_TYPE_ZOMBIE_GPUMEM_UMA, uiBytes);
+			break;
+#endif
 
 		case PVRSRV_MEM_ALLOC_TYPE_MAP_UMA_LMA_PAGES:
 			DECREASE_GLOBAL_STAT_VALUE(gsGlobalStats, PVRSRV_DRIVER_STAT_TYPE_MAPPED_GPUMEM_UMA_LMA, uiBytes);
@@ -1198,17 +1242,46 @@ static void _decrease_global_stat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 			DECREASE_GLOBAL_STAT_VALUE(gsGlobalStats, PVRSRV_DRIVER_STAT_TYPE_ALLOC_GPUMEM_UMA_POOL, uiBytes);
 			break;
 
+		case PVRSRV_MEM_ALLOC_TYPE_DMA_BUF_IMPORT:
+			DECREASE_GLOBAL_STAT_VALUE(gsGlobalStats, PVRSRV_DRIVER_STAT_TYPE_DMA_BUF_IMPORT, uiBytes);
+			break;
+
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+		case PVRSRV_MEM_ALLOC_TYPE_DMA_BUF_ZOMBIE:
+			DECREASE_GLOBAL_STAT_VALUE(gsGlobalStats, PVRSRV_DRIVER_STAT_TYPE_DMA_BUF_ZOMBIE, uiBytes);
+			break;
+#endif
+
 		default:
 			PVR_ASSERT(0);
 			break;
 	}
+
+#if defined(ENABLE_GPU_MEM_TRACEPOINT)
+	{
+		IMG_UINT64 ui64Size = GET_GPUMEM_GLOBAL_STAT_VALUE();
+		if (ui64Size != ui64InitialSize)
+		{
+			TracepointUpdateGPUMemGlobal(0, ui64Size);
+		}
+	}
+#endif
+
 	OSLockRelease(gsGlobalStats.hGlobalStatsLock);
 }
 
 static void _increase_global_stat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 								  size_t uiBytes)
 {
+#if defined(ENABLE_GPU_MEM_TRACEPOINT)
+	IMG_UINT64 ui64InitialSize;
+#endif
+
 	OSLockAcquire(gsGlobalStats.hGlobalStatsLock);
+
+#if defined(ENABLE_GPU_MEM_TRACEPOINT)
+	ui64InitialSize = GET_GPUMEM_GLOBAL_STAT_VALUE();
+#endif
 
 	switch (eAllocType)
 	{
@@ -1240,9 +1313,21 @@ static void _increase_global_stat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 			INCREASE_GLOBAL_STAT_VALUE(gsGlobalStats, PVRSRV_DRIVER_STAT_TYPE_ALLOC_GPUMEM_LMA, uiBytes);
 			break;
 
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+		case PVRSRV_MEM_ALLOC_TYPE_ZOMBIE_LMA_PAGES:
+			INCREASE_GLOBAL_STAT_VALUE(gsGlobalStats, PVRSRV_DRIVER_STAT_TYPE_ZOMBIE_GPUMEM_LMA, uiBytes);
+			break;
+#endif
+
 		case PVRSRV_MEM_ALLOC_TYPE_ALLOC_UMA_PAGES:
 			INCREASE_GLOBAL_STAT_VALUE(gsGlobalStats, PVRSRV_DRIVER_STAT_TYPE_ALLOC_GPUMEM_UMA, uiBytes);
 			break;
+
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+		case PVRSRV_MEM_ALLOC_TYPE_ZOMBIE_UMA_PAGES:
+			INCREASE_GLOBAL_STAT_VALUE(gsGlobalStats, PVRSRV_DRIVER_STAT_TYPE_ZOMBIE_GPUMEM_UMA, uiBytes);
+			break;
+#endif
 
 		case PVRSRV_MEM_ALLOC_TYPE_MAP_UMA_LMA_PAGES:
 			INCREASE_GLOBAL_STAT_VALUE(gsGlobalStats, PVRSRV_DRIVER_STAT_TYPE_MAPPED_GPUMEM_UMA_LMA, uiBytes);
@@ -1252,10 +1337,31 @@ static void _increase_global_stat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 			INCREASE_GLOBAL_STAT_VALUE(gsGlobalStats, PVRSRV_DRIVER_STAT_TYPE_ALLOC_GPUMEM_UMA_POOL, uiBytes);
 			break;
 
+		case PVRSRV_MEM_ALLOC_TYPE_DMA_BUF_IMPORT:
+			INCREASE_GLOBAL_STAT_VALUE(gsGlobalStats, PVRSRV_DRIVER_STAT_TYPE_DMA_BUF_IMPORT, uiBytes);
+			break;
+
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+		case PVRSRV_MEM_ALLOC_TYPE_DMA_BUF_ZOMBIE:
+			INCREASE_GLOBAL_STAT_VALUE(gsGlobalStats, PVRSRV_DRIVER_STAT_TYPE_DMA_BUF_ZOMBIE, uiBytes);
+			break;
+#endif
+
 		default:
 			PVR_ASSERT(0);
 			break;
 	}
+
+#if defined(ENABLE_GPU_MEM_TRACEPOINT)
+	{
+		IMG_UINT64 ui64Size = GET_GPUMEM_GLOBAL_STAT_VALUE();
+		if (ui64Size != ui64InitialSize)
+		{
+			TracepointUpdateGPUMemGlobal(0, ui64Size);
+		}
+	}
+#endif
+
 	OSLockRelease(gsGlobalStats.hGlobalStatsLock);
 }
 
@@ -1396,6 +1502,10 @@ PVRSRVStatsAddMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 	       PVRSRV_PROC_RESURRECTED
 	     } eProcSearch = PVRSRV_PROC_FOUND;
 
+#if defined(ENABLE_GPU_MEM_TRACEPOINT)
+	IMG_UINT64 ui64InitialSize;
+#endif
+
 	/* Don't do anything if we are not initialised or we are shutting down! */
 	if (!bProcessStatsInitialised)
 	{
@@ -1525,6 +1635,10 @@ PVRSRVStatsAddMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 		List_PVRSRV_MEM_ALLOC_REC_Insert(&psProcessStats->psMemoryRecords, psRecord);
 	}
 
+#if defined(ENABLE_GPU_MEM_TRACEPOINT)
+	ui64InitialSize = GET_GPUMEM_PERPID_STAT_VALUE(psProcessStats);
+#endif
+
 	/* Update the memory watermarks... */
 	switch (eAllocType)
 	{
@@ -1630,6 +1744,16 @@ PVRSRVStatsAddMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 		}
 		break;
 
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+		case PVRSRV_MEM_ALLOC_TYPE_ZOMBIE_LMA_PAGES:
+		{
+			INCREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_ZOMBIE_LMA_PAGES, uiBytes);
+			INCREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_TOTAL, uiBytes);
+			psProcessStats->ui32StatAllocFlags |= (IMG_UINT32)(1 << (PVRSRV_PROCESS_STAT_TYPE_ZOMBIE_LMA_PAGES-PVRSRV_PROCESS_STAT_TYPE_KMALLOC));
+		}
+		break;
+#endif
+
 		case PVRSRV_MEM_ALLOC_TYPE_ALLOC_UMA_PAGES:
 		{
 			if (psRecord != NULL)
@@ -1641,6 +1765,16 @@ PVRSRVStatsAddMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 			psProcessStats->ui32StatAllocFlags |= (IMG_UINT32)(1 << (PVRSRV_PROCESS_STAT_TYPE_ALLOC_UMA_PAGES-PVRSRV_PROCESS_STAT_TYPE_KMALLOC));
 		}
 		break;
+
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+		case PVRSRV_MEM_ALLOC_TYPE_ZOMBIE_UMA_PAGES:
+		{
+			INCREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_ZOMBIE_UMA_PAGES, uiBytes);
+			INCREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_TOTAL, uiBytes);
+			psProcessStats->ui32StatAllocFlags |= (IMG_UINT32)(1 << (PVRSRV_PROCESS_STAT_TYPE_ZOMBIE_UMA_PAGES-PVRSRV_PROCESS_STAT_TYPE_KMALLOC));
+		}
+		break;
+#endif
 
 		case PVRSRV_MEM_ALLOC_TYPE_MAP_UMA_LMA_PAGES:
 		{
@@ -1663,6 +1797,18 @@ PVRSRVStatsAddMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 		}
 		break;
 	}
+
+#if defined(ENABLE_GPU_MEM_TRACEPOINT)
+	if (psProcessStats->pid != PVR_SYS_ALLOC_PID)
+	{
+		IMG_UINT64 ui64Size = GET_GPUMEM_PERPID_STAT_VALUE(psProcessStats);
+		if (ui64Size != ui64InitialSize)
+		{
+			TracepointUpdateGPUMemPerProcess(0, psProcessStats->pid, ui64Size);
+		}
+	}
+#endif
+
 	OSLockRelease(psProcessStats->hLock);
 
 	return;
@@ -1904,6 +2050,10 @@ PVRSRVStatsIncrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 	       PVRSRV_PROC_RESURRECTED
 	     } eProcSearch = PVRSRV_PROC_FOUND;
 
+#if defined(ENABLE_GPU_MEM_TRACEPOINT)
+	IMG_UINT64 ui64InitialSize;
+#endif
+
 	/* Don't do anything if we are not initialised or we are shutting down! */
 	if (!bProcessStatsInitialised)
 	{
@@ -1987,6 +2137,11 @@ PVRSRVStatsIncrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 		 * deleted or modified
 		 */
 		OSLockRelease(g_psLinkedListLock);
+
+#if defined(ENABLE_GPU_MEM_TRACEPOINT)
+		ui64InitialSize = GET_GPUMEM_PERPID_STAT_VALUE(psProcessStats);
+#endif
+
 		/* Update the memory watermarks... */
 		switch (eAllocType)
 		{
@@ -2044,6 +2199,16 @@ PVRSRVStatsIncrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 			}
 			break;
 
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+			case PVRSRV_MEM_ALLOC_TYPE_ZOMBIE_LMA_PAGES:
+			{
+				INCREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_ZOMBIE_LMA_PAGES, uiBytes);
+				INCREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_TOTAL, uiBytes);
+				psProcessStats->ui32StatAllocFlags |= (IMG_UINT32)(1 << (PVRSRV_PROCESS_STAT_TYPE_ZOMBIE_LMA_PAGES-PVRSRV_PROCESS_STAT_TYPE_KMALLOC));
+			}
+			break;
+#endif
+
 			case PVRSRV_MEM_ALLOC_TYPE_ALLOC_UMA_PAGES:
 			{
 				INCREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_ALLOC_UMA_PAGES, (IMG_UINT32)uiBytes);
@@ -2052,6 +2217,16 @@ PVRSRVStatsIncrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 			}
 			break;
 
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+			case PVRSRV_MEM_ALLOC_TYPE_ZOMBIE_UMA_PAGES:
+			{
+				INCREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_ZOMBIE_UMA_PAGES, uiBytes);
+				INCREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_TOTAL, uiBytes);
+				psProcessStats->ui32StatAllocFlags |= (IMG_UINT32)(1 << (PVRSRV_PROCESS_STAT_TYPE_ZOMBIE_UMA_PAGES-PVRSRV_PROCESS_STAT_TYPE_KMALLOC));
+			}
+			break;
+#endif
+
 			case PVRSRV_MEM_ALLOC_TYPE_MAP_UMA_LMA_PAGES:
 			{
 				INCREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_MAP_UMA_LMA_PAGES, (IMG_UINT32)uiBytes);
@@ -2059,12 +2234,40 @@ PVRSRVStatsIncrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 			}
 			break;
 
+			case PVRSRV_MEM_ALLOC_TYPE_DMA_BUF_IMPORT:
+			{
+				INCREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_DMA_BUF_IMPORT, (IMG_UINT32)uiBytes);
+				psProcessStats->ui32StatAllocFlags |= (IMG_UINT32)(1 << (PVRSRV_PROCESS_STAT_TYPE_DMA_BUF_IMPORT-PVRSRV_PROCESS_STAT_TYPE_KMALLOC));
+			}
+
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+			case PVRSRV_MEM_ALLOC_TYPE_DMA_BUF_ZOMBIE:
+			{
+				INCREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_DMA_BUF_ZOMBIE, uiBytes);
+				psProcessStats->ui32StatAllocFlags |= (IMG_UINT32)(1 << (PVRSRV_PROCESS_STAT_TYPE_DMA_BUF_ZOMBIE-PVRSRV_PROCESS_STAT_TYPE_KMALLOC));
+			}
+			break;
+#endif
+
 			default:
 			{
 				PVR_ASSERT(0);
 			}
 			break;
 		}
+
+#if defined(ENABLE_GPU_MEM_TRACEPOINT)
+		if (psProcessStats->pid != PVR_SYS_ALLOC_PID)
+		{
+			IMG_UINT64 ui64Size = GET_GPUMEM_PERPID_STAT_VALUE(psProcessStats);
+			if (ui64Size != ui64InitialSize)
+			{
+				TracepointUpdateGPUMemPerProcess(0, psProcessStats->pid,
+				                                 ui64Size);
+			}
+		}
+#endif
+
 		OSLockRelease(psProcessStats->hLock);
 	}
 
@@ -2075,6 +2278,10 @@ _DecreaseProcStatValue(PVRSRV_MEM_ALLOC_TYPE eAllocType,
                        PVRSRV_PROCESS_STATS* psProcessStats,
                        IMG_UINT32 uiBytes)
 {
+#if defined(ENABLE_GPU_MEM_TRACEPOINT)
+	IMG_UINT64 ui64InitialSize = GET_GPUMEM_PERPID_STAT_VALUE(psProcessStats);
+#endif
+
 	switch (eAllocType)
 	{
 		case PVRSRV_MEM_ALLOC_TYPE_KMALLOC:
@@ -2152,6 +2359,19 @@ _DecreaseProcStatValue(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 		}
 		break;
 
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+		case PVRSRV_MEM_ALLOC_TYPE_ZOMBIE_LMA_PAGES:
+		{
+			DECREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_ZOMBIE_LMA_PAGES, uiBytes);
+			DECREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_TOTAL, uiBytes);
+			if (psProcessStats->i32StatValue[PVRSRV_PROCESS_STAT_TYPE_ZOMBIE_LMA_PAGES] == 0)
+			{
+				psProcessStats->ui32StatAllocFlags &= ~(IMG_UINT32)(1 << (PVRSRV_PROCESS_STAT_TYPE_ZOMBIE_LMA_PAGES-PVRSRV_PROCESS_STAT_TYPE_KMALLOC));
+			}
+		}
+		break;
+#endif
+
 		case PVRSRV_MEM_ALLOC_TYPE_ALLOC_UMA_PAGES:
 		{
 			DECREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_ALLOC_UMA_PAGES, (IMG_UINT32)uiBytes);
@@ -2163,6 +2383,19 @@ _DecreaseProcStatValue(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 		}
 		break;
 
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+		case PVRSRV_MEM_ALLOC_TYPE_ZOMBIE_UMA_PAGES:
+		{
+			DECREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_ZOMBIE_UMA_PAGES, uiBytes);
+			DECREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_TOTAL, uiBytes);
+			if (psProcessStats->i32StatValue[PVRSRV_PROCESS_STAT_TYPE_ZOMBIE_UMA_PAGES] == 0)
+			{
+				psProcessStats->ui32StatAllocFlags &= ~(IMG_UINT32)(1 << (PVRSRV_PROCESS_STAT_TYPE_ZOMBIE_UMA_PAGES-PVRSRV_PROCESS_STAT_TYPE_KMALLOC));
+			}
+		}
+		break;
+#endif
+
 		case PVRSRV_MEM_ALLOC_TYPE_MAP_UMA_LMA_PAGES:
 		{
 			DECREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_MAP_UMA_LMA_PAGES, (IMG_UINT32)uiBytes);
@@ -2173,6 +2406,28 @@ _DecreaseProcStatValue(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 		}
 		break;
 
+		case PVRSRV_MEM_ALLOC_TYPE_DMA_BUF_IMPORT:
+		{
+			DECREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_DMA_BUF_IMPORT, (IMG_UINT32)uiBytes);
+			if (psProcessStats->i32StatValue[PVRSRV_PROCESS_STAT_TYPE_DMA_BUF_IMPORT] == 0)
+			{
+					psProcessStats->ui32StatAllocFlags &= ~(IMG_UINT32)(1 << (PVRSRV_PROCESS_STAT_TYPE_DMA_BUF_IMPORT-PVRSRV_PROCESS_STAT_TYPE_KMALLOC));
+			}
+		}
+		break;
+
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+		case PVRSRV_MEM_ALLOC_TYPE_DMA_BUF_ZOMBIE:
+		{
+			DECREASE_STAT_VALUE(psProcessStats, PVRSRV_PROCESS_STAT_TYPE_DMA_BUF_ZOMBIE, uiBytes);
+			if (psProcessStats->i32StatValue[PVRSRV_PROCESS_STAT_TYPE_DMA_BUF_ZOMBIE] == 0)
+			{
+				psProcessStats->ui32StatAllocFlags &= ~(IMG_UINT32)(1 << (PVRSRV_PROCESS_STAT_TYPE_DMA_BUF_ZOMBIE-PVRSRV_PROCESS_STAT_TYPE_KMALLOC));
+			}
+		}
+		break;
+#endif
+
 		default:
 		{
 			PVR_ASSERT(0);
@@ -2180,6 +2435,16 @@ _DecreaseProcStatValue(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 		break;
 	}
 
+#if defined(ENABLE_GPU_MEM_TRACEPOINT)
+	if (psProcessStats->pid != PVR_SYS_ALLOC_PID)
+	{
+		IMG_UINT64 ui64Size = GET_GPUMEM_PERPID_STAT_VALUE(psProcessStats);
+		if (ui64Size != ui64InitialSize)
+		{
+			TracepointUpdateGPUMemPerProcess(0, psProcessStats->pid, ui64Size);
+		}
+	}
+#endif
 }
 
 #if defined(PVRSRV_ENABLE_MEMTRACK_STATS_FILE)
@@ -2968,16 +3233,26 @@ MemStatsPrintElements(OSDI_IMPL_ENTRY *psEntry,
 
 		switch (psRecord->eAllocType)
 		{
-		case PVRSRV_MEM_ALLOC_TYPE_KMALLOC:				DIPrintf(psEntry, "KMALLOC             "); break;
-		case PVRSRV_MEM_ALLOC_TYPE_VMALLOC:				DIPrintf(psEntry, "VMALLOC             "); break;
-		case PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_LMA:	DIPrintf(psEntry, "ALLOC_PAGES_PT_LMA  "); break;
-		case PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_UMA:	DIPrintf(psEntry, "ALLOC_PAGES_PT_UMA  "); break;
-		case PVRSRV_MEM_ALLOC_TYPE_IOREMAP_PT_LMA:		DIPrintf(psEntry, "IOREMAP_PT_LMA      "); break;
-		case PVRSRV_MEM_ALLOC_TYPE_VMAP_PT_UMA:			DIPrintf(psEntry, "VMAP_PT_UMA         "); break;
-		case PVRSRV_MEM_ALLOC_TYPE_ALLOC_LMA_PAGES:		DIPrintf(psEntry, "ALLOC_LMA_PAGES     "); break;
-		case PVRSRV_MEM_ALLOC_TYPE_ALLOC_UMA_PAGES:		DIPrintf(psEntry, "ALLOC_UMA_PAGES     "); break;
-		case PVRSRV_MEM_ALLOC_TYPE_MAP_UMA_LMA_PAGES:	DIPrintf(psEntry, "MAP_UMA_LMA_PAGES   "); break;
-		default:										DIPrintf(psEntry, "INVALID             "); break;
+		case PVRSRV_MEM_ALLOC_TYPE_KMALLOC:             DIPrintf(psEntry, "KMALLOC             "); break;
+		case PVRSRV_MEM_ALLOC_TYPE_VMALLOC:             DIPrintf(psEntry, "VMALLOC             "); break;
+		case PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_LMA:  DIPrintf(psEntry, "ALLOC_PAGES_PT_LMA  "); break;
+		case PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_UMA:  DIPrintf(psEntry, "ALLOC_PAGES_PT_UMA  "); break;
+		case PVRSRV_MEM_ALLOC_TYPE_IOREMAP_PT_LMA:      DIPrintf(psEntry, "IOREMAP_PT_LMA      "); break;
+		case PVRSRV_MEM_ALLOC_TYPE_VMAP_PT_UMA:         DIPrintf(psEntry, "VMAP_PT_UMA         "); break;
+		case PVRSRV_MEM_ALLOC_TYPE_ALLOC_LMA_PAGES:     DIPrintf(psEntry, "ALLOC_LMA_PAGES     "); break;
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+		case PVRSRV_MEM_ALLOC_TYPE_ZOMBIE_LMA_PAGES:    DIPrintf(psEntry, "ZOMBIE_LMA_PAGES    "); break;
+#endif
+		case PVRSRV_MEM_ALLOC_TYPE_ALLOC_UMA_PAGES:     DIPrintf(psEntry, "ALLOC_UMA_PAGES     "); break;
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+		case PVRSRV_MEM_ALLOC_TYPE_ZOMBIE_UMA_PAGES:    DIPrintf(psEntry, "ZOMBIE_UMA_PAGES    "); break;
+#endif
+		case PVRSRV_MEM_ALLOC_TYPE_MAP_UMA_LMA_PAGES:   DIPrintf(psEntry, "MAP_UMA_LMA_PAGES   "); break;
+		case PVRSRV_MEM_ALLOC_TYPE_DMA_BUF_IMPORT:      DIPrintf(psEntry, "DMA_BUF_IMPORT      "); break;
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+		case PVRSRV_MEM_ALLOC_TYPE_DMA_BUF_ZOMBIE:      DIPrintf(psEntry, "DMA_BUF_ZOMBIE      "); break;
+#endif
+		default:                                        DIPrintf(psEntry, "INVALID             "); break;
 		}
 
 		if (bPrintStat)
@@ -3168,9 +3443,11 @@ PVRSRV_ERROR PVRSRVFindProcessMemStats(IMG_PID pid, IMG_UINT32 ui32ArrSize, IMG_
 
 	if (bAllProcessStats)
 	{
-		PVR_LOG_RETURN_IF_FALSE(ui32ArrSize == PVRSRV_DRIVER_STAT_TYPE_COUNT,
-				  "MemStats array size is incorrect",
-				  PVRSRV_ERROR_INVALID_PARAMS);
+		/* expect size of array decreased by 2 to maintain compatibility with
+		 * older clients (ones that do not know about new dmabuf import stats) */
+		PVR_LOG_RETURN_IF_FALSE(ui32ArrSize == PVRSRV_DRIVER_STAT_TYPE_COUNT - 2,
+		                        "MemStats array size is incorrect",
+		                        PVRSRV_ERROR_INVALID_PARAMS);
 
 		OSLockAcquire(gsGlobalStats.hGlobalStatsLock);
 
@@ -3184,9 +3461,11 @@ PVRSRV_ERROR PVRSRVFindProcessMemStats(IMG_PID pid, IMG_UINT32 ui32ArrSize, IMG_
 		return PVRSRV_OK;
 	}
 
-	PVR_LOG_RETURN_IF_FALSE(ui32ArrSize == PVRSRV_PROCESS_STAT_TYPE_COUNT,
-			  "MemStats array size is incorrect",
-			  PVRSRV_ERROR_INVALID_PARAMS);
+	/* expect size of array decreased by 2 to maintain compatibility with
+	 * older clients (ones that do not know about new dmabuf import stats) */
+	PVR_LOG_RETURN_IF_FALSE(ui32ArrSize == PVRSRV_PROCESS_STAT_TYPE_COUNT - 2,
+	                        "MemStats array size is incorrect",
+	                        PVRSRV_ERROR_INVALID_PARAMS);
 
 	OSLockAcquire(g_psLinkedListLock);
 

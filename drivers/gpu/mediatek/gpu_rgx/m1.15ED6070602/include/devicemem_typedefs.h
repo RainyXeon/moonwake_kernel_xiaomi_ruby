@@ -112,11 +112,7 @@ typedef enum Resize {
 
 	SPARSE_RESIZE_BOTH = ((IMG_UINT8)SPARSE_RESIZE_ALLOC | (IMG_UINT8)SPARSE_RESIZE_FREE),
 
-	/* This should be set to silently swap underlying physical memory
-	 * without disturbing its device or cpu virtual maps.
-	 * This flag is not supported in the case of PDUMP and could lead to
-	 * PDUMP panic when used.
-	 */
+	/* Remap functionality not supported, reserved for compatibility. */
 	SPARSE_REMAP_MEM = 4,
 
 	/* Should be set to get the sparse changes appear in cpu virtual map */
@@ -138,5 +134,11 @@ typedef enum Resize {
  * annotations stored in memory, including the null terminator.
  */
 #define DEVMEM_ANNOTATION_MAX_LEN (PVR_ANNOTATION_MAX_LEN + 1)
+
+
+/* Reserved VA space of a heap must always be multiple of DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY
+ * Granularity has been chosen to support the max possible practically used OS page size.
+ */
+#define DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY        0x10000 /* 64KB is MAX anticipated OS page size */
 
 #endif /* #ifndef DEVICEMEM_TYPEDEFS_H */

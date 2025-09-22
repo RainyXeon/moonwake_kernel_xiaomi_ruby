@@ -77,6 +77,14 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #else
 #include <linux/sched.h>
 #endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)) */
+#if defined(SUPPORT_SECURE_ALLOC_KM)
+#if defined(PVR_ANDROID_HAS_DMA_HEAP_FIND)
+#include <linux/dma-heap.h>
+#include "physmem_dmabuf.h"
+#else
+#include "physmem.h"
+#endif
+#endif
 
 #include "log2.h"
 #include "osfunc.h"
@@ -101,6 +109,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "dma_km.h"
 #include "pvrsrv_sync_server.h"
 
+#if defined(PVRSRV_ENABLE_GPU_MEMORY_INFO)
+#include "ri_server.h"
+#include "pvr_ricommon.h"
+#endif
 
 #if defined(VIRTUAL_PLATFORM)
 #define EVENT_OBJECT_TIMEOUT_US		(120000000ULL)
@@ -755,6 +767,7 @@ static const error_map_t asErrorMap[] =
 	{-ERANGE, PVRSRV_ERROR_BRIDGE_BUFFER_TOO_SMALL},
 	{-ENOMEM, PVRSRV_ERROR_OUT_OF_MEMORY},
 	{-EINVAL, PVRSRV_ERROR_INVALID_PARAMS},
+	{-EINVAL, PVRSRV_ERROR_BAD_MAPPING},
 
 	{0,       PVRSRV_OK}
 };
@@ -2490,3 +2503,123 @@ e0:
 }
 
 #endif /* SUPPORT_DMA_TRANSFER */
+
+#if defined(SUPPORT_SECURE_ALLOC_KM)
+#if defined(PVR_ANDROID_HAS_DMA_HEAP_FIND)
+IMG_INTERNAL PVRSRV_ERROR
+OSAllocateSecBuf(PVRSRV_DEVICE_NODE *psDeviceNode,
+				 IMG_DEVMEM_SIZE_T uiSize,
+				 const IMG_CHAR *pszName,
+				 PMR **ppsPMR)
+{
+	struct dma_heap *heap;
+	struct dma_buf *buf;
+	struct device *dev;
+	struct dma_buf_attachment *buf_attachment;
+
+	IMG_UINT32 ui32MappingTable = 0;
+	PVRSRV_ERROR eError;
+	IMG_CHAR *pszHeapName;
+
+	PVR_LOG_RETURN_IF_INVALID_PARAM(psDeviceNode, "psDeviceNode");
+	PVR_LOG_RETURN_IF_INVALID_PARAM(psDeviceNode->psDevConfig->pszSecureDMAHeapName, "pszSecureDMAHeapName");
+	PVR_LOG_RETURN_IF_INVALID_PARAM((OSStringLength(psDeviceNode->psDevConfig->pszSecureDMAHeapName) > 0), "pszSecureDMAHeapName length");
+
+	pszHeapName = psDeviceNode->psDevConfig->pszSecureDMAHeapName;
+	dev = (struct device*)psDeviceNode->psDevConfig->pvOSDevice;
+
+	heap = dma_heap_find(pszHeapName);
+	PVR_LOG_GOTO_IF_NOMEM(heap, eError, ErrorExit);
+
+	buf = dma_heap_buffer_alloc(heap, uiSize, 0, 0);
+	PVR_LOG_GOTO_IF_NOMEM(buf, eError, ErrorBufPut);
+
+	buf_attachment = dma_buf_attach(buf, dev);
+	PVR_LOG_GOTO_IF_NOMEM(buf_attachment, eError, ErrorBufFree);
+
+	eError = PhysmemCreateNewDmaBufBackedPMR(psDeviceNode->apsPhysHeap[PVRSRV_PHYS_HEAP_EXTERNAL],
+											 buf_attachment,
+											 NULL,
+											 PVRSRV_MEMALLOCFLAG_GPU_READABLE
+											 | PVRSRV_MEMALLOCFLAG_GPU_WRITEABLE,
+											 uiSize,
+											 1,
+											 1,
+											 &ui32MappingTable,
+											 OSStringLength(pszName),
+											 pszName,
+											 ppsPMR);
+	PVR_LOG_GOTO_IF_ERROR(eError, "PhysmemCreateNewDmaBufBackedPMR", ErrorBufDetach);
+
+	return PVRSRV_OK;
+
+ErrorBufDetach:
+	dma_buf_detach(buf, buf_attachment);
+ErrorBufFree:
+	dma_heap_buffer_free(buf);
+ErrorBufPut:
+	dma_buf_put(buf);
+ErrorExit:
+
+	return eError;
+}
+
+IMG_INTERNAL void
+OSFreeSecBuf(PMR *psPMR)
+{
+	struct dma_buf *buf = PhysmemGetDmaBuf(psPMR);
+	dma_buf_put(buf);
+	dma_heap_buffer_free(buf);
+
+	PMRUnrefPMR(psPMR);
+}
+#else /* PVR_ANDROID_HAS_DMA_HEAP_FIND */
+IMG_INTERNAL PVRSRV_ERROR
+OSAllocateSecBuf(PVRSRV_DEVICE_NODE *psDeviceNode,
+				 IMG_DEVMEM_SIZE_T uiSize,
+				 const IMG_CHAR *pszName,
+				 PMR **ppsPMR)
+{
+	IMG_UINT32 ui32MappingTable = 0;
+	PVRSRV_ERROR eError;
+
+	eError = PhysmemNewRamBackedPMR(NULL,
+									psDeviceNode,
+									uiSize,
+									OSGetPageSize(),
+									1,
+									1,
+									&ui32MappingTable,
+									ExactLog2(OSGetPageSize()),
+									PVRSRV_MEMALLOCFLAG_PHYS_HEAP_HINT(GPU_SECURE)
+									| PVRSRV_MEMALLOCFLAG_GPU_READABLE
+									| PVRSRV_MEMALLOCFLAG_GPU_WRITEABLE,
+									OSStringLength(pszName),
+									pszName,
+									OSGetCurrentClientProcessIDKM(),
+									ppsPMR,
+									PDUMP_NONE);
+	PVR_LOG_GOTO_IF_ERROR(eError, "PhysmemNewRamBackedPMR", ErrorExit);
+
+#if defined(PVRSRV_ENABLE_GPU_MEMORY_INFO)
+	eError = RIWritePMREntryWithOwnerKM(*ppsPMR, PVR_SYS_ALLOC_PID);
+	PVR_LOG_GOTO_IF_ERROR(eError, "RIWritePMREntryWithOwnerKM", ErrorUnrefPMR);
+#endif
+
+	return PVRSRV_OK;
+
+#if defined(PVRSRV_ENABLE_GPU_MEMORY_INFO)
+ErrorUnrefPMR:
+	PMRUnrefPMR(*ppsPMR);
+#endif
+ErrorExit:
+	return eError;
+}
+
+IMG_INTERNAL void
+OSFreeSecBuf(PMR *psPMR)
+{
+	PMRUnrefPMR(psPMR);
+}
+#endif
+#endif /* SUPPORT_SECURE_ALLOC_KM */

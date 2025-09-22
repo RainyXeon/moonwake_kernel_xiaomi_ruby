@@ -337,6 +337,11 @@ struct _PVRSRV_DEVICE_CONFIG_
 	/*! Callbacks to ping the trusted device to securely run RGXStart/Stop() */
 	PFN_TD_RGXSTART pfnTDRGXStart;
 	PFN_TD_RGXSTOP pfnTDRGXStop;
+
+#if defined(PVR_ANDROID_HAS_DMA_HEAP_FIND)
+	/*! Name of DMA heap to allocate secure memory from. Used with dma_heap_find. */
+	IMG_CHAR *pszSecureDMAHeapName;
+#endif
 #endif /* defined(SUPPORT_TRUSTED_DEVICE) */
 
 	/*! Function that does device feature specific system layer initialisation */

@@ -14,6 +14,7 @@
 #include <net/strparser.h>
 
 #define MAX_MSG_FRAGS			MAX_SKB_FRAGS
+#define NR_MSG_FRAG_IDS			(MAX_MSG_FRAGS + 1)
 
 enum __sk_action {
 	__SK_DROP = 0,
@@ -28,10 +29,18 @@ struct sk_msg_sg {
 	u32				end;
 	u32				size;
 	u32				copybreak;
-	bool				copy[MAX_MSG_FRAGS];
-	struct scatterlist		data[MAX_MSG_FRAGS];
+	unsigned long			copy;
+	/* The extra two elements:
+	 * 1) used for chaining the front and sections when the list becomes
+	 *    partitioned (e.g. end < start). The crypto APIs require the
+	 *    chaining;
+	 * 2) to chain tailer SG entries after the message.
+	 */
+	struct scatterlist		data[MAX_MSG_FRAGS + 2];
 };
+static_assert(BITS_PER_LONG >= NR_MSG_FRAG_IDS);
 
+/* UAPI in filter.c depends on struct sk_msg_sg being first element. */
 struct sk_msg {
 	struct sk_msg_sg		sg;
 	void				*data;
@@ -89,6 +98,7 @@ struct sk_psock {
 	spinlock_t			link_lock;
 	refcount_t			refcnt;
 	void (*saved_unhash)(struct sock *sk);
+	void (*saved_destroy)(struct sock *sk);
 	void (*saved_close)(struct sock *sk, long timeout);
 	void (*saved_write_space)(struct sock *sk);
 	struct proto			*sk_proto;
@@ -102,6 +112,8 @@ struct sk_psock {
 
 int sk_msg_alloc(struct sock *sk, struct sk_msg *msg, int len,
 		 int elem_first_coalesce);
+int sk_msg_clone(struct sock *sk, struct sk_msg *dst, struct sk_msg *src,
+		 u32 off, u32 len);
 void sk_msg_trim(struct sock *sk, struct sk_msg *msg, int len);
 int sk_msg_free(struct sock *sk, struct sk_msg *msg);
 int sk_msg_free_nocharge(struct sock *sk, struct sk_msg *msg);
@@ -110,6 +122,7 @@ void sk_msg_free_partial_nocharge(struct sock *sk, struct sk_msg *msg,
 				  u32 bytes);
 
 void sk_msg_return(struct sock *sk, struct sk_msg *msg, int bytes);
+void sk_msg_return_zero(struct sock *sk, struct sk_msg *msg, int bytes);
 
 int sk_msg_zerocopy_from_iter(struct sock *sk, struct iov_iter *from,
 			      struct sk_msg *msg, u32 bytes);
@@ -131,10 +144,15 @@ static inline void sk_msg_apply_bytes(struct sk_psock *psock, u32 bytes)
 	}
 }
 
+static inline u32 sk_msg_iter_dist(u32 start, u32 end)
+{
+	return end >= start ? end - start : end + (NR_MSG_FRAG_IDS - start);
+}
+
 #define sk_msg_iter_var_prev(var)			\
 	do {						\
 		if (var == 0)				\
-			var = MAX_MSG_FRAGS - 1;	\
+			var = NR_MSG_FRAG_IDS - 1;	\
 		else					\
 			var--;				\
 	} while (0)
@@ -142,7 +160,7 @@ static inline void sk_msg_apply_bytes(struct sk_psock *psock, u32 bytes)
 #define sk_msg_iter_var_next(var)			\
 	do {						\
 		var++;					\
-		if (var == MAX_MSG_FRAGS)		\
+		if (var == NR_MSG_FRAG_IDS)		\
 			var = 0;			\
 	} while (0)
 
@@ -159,8 +177,9 @@ static inline void sk_msg_clear_meta(struct sk_msg *msg)
 
 static inline void sk_msg_init(struct sk_msg *msg)
 {
+	BUILD_BUG_ON(ARRAY_SIZE(msg->sg.data) - 1 != NR_MSG_FRAG_IDS);
 	memset(msg, 0, sizeof(*msg));
-	sg_init_marker(msg->sg.data, ARRAY_SIZE(msg->sg.data));
+	sg_init_marker(msg->sg.data, NR_MSG_FRAG_IDS);
 }
 
 static inline void sk_msg_xfer(struct sk_msg *dst, struct sk_msg *src,
@@ -168,25 +187,35 @@ static inline void sk_msg_xfer(struct sk_msg *dst, struct sk_msg *src,
 {
 	dst->sg.data[which] = src->sg.data[which];
 	dst->sg.data[which].length  = size;
+	dst->sg.size		   += size;
 	src->sg.data[which].length -= size;
 	src->sg.data[which].offset += size;
 }
 
-static inline u32 sk_msg_elem_used(const struct sk_msg *msg)
+static inline void sk_msg_xfer_full(struct sk_msg *dst, struct sk_msg *src)
 {
-	return msg->sg.end >= msg->sg.start ?
-		msg->sg.end - msg->sg.start :
-		msg->sg.end + (MAX_MSG_FRAGS - msg->sg.start);
+	memcpy(dst, src, sizeof(*src));
+	sk_msg_init(src);
 }
 
 static inline bool sk_msg_full(const struct sk_msg *msg)
 {
-	return (msg->sg.end == msg->sg.start) && msg->sg.size;
+	return sk_msg_iter_dist(msg->sg.start, msg->sg.end) == MAX_MSG_FRAGS;
+}
+
+static inline u32 sk_msg_elem_used(const struct sk_msg *msg)
+{
+	return sk_msg_iter_dist(msg->sg.start, msg->sg.end);
 }
 
 static inline struct scatterlist *sk_msg_elem(struct sk_msg *msg, int which)
 {
 	return &msg->sg.data[which];
+}
+
+static inline struct scatterlist sk_msg_elem_cpy(struct sk_msg *msg, int which)
+{
+	return msg->sg.data[which];
 }
 
 static inline struct page *sk_msg_page(struct sk_msg *msg, int which)
@@ -203,7 +232,7 @@ static inline void sk_msg_compute_data_pointers(struct sk_msg *msg)
 {
 	struct scatterlist *sge = sk_msg_elem(msg, msg->sg.start);
 
-	if (msg->sg.copy[msg->sg.start]) {
+	if (test_bit(msg->sg.start, &msg->sg.copy)) {
 		msg->data = NULL;
 		msg->data_end = NULL;
 	} else {
@@ -222,9 +251,32 @@ static inline void sk_msg_page_add(struct sk_msg *msg, struct page *page,
 	sg_set_page(sge, page, len, offset);
 	sg_unmark_end(sge);
 
-	msg->sg.copy[msg->sg.end] = true;
+	__set_bit(msg->sg.end, &msg->sg.copy);
 	msg->sg.size += len;
 	sk_msg_iter_next(msg, end);
+}
+
+static inline void sk_msg_sg_copy(struct sk_msg *msg, u32 i, bool copy_state)
+{
+	do {
+		if (copy_state)
+			__set_bit(i, &msg->sg.copy);
+		else
+			__clear_bit(i, &msg->sg.copy);
+		sk_msg_iter_var_next(i);
+		if (i == msg->sg.end)
+			break;
+	} while (1);
+}
+
+static inline void sk_msg_sg_copy_set(struct sk_msg *msg, u32 start)
+{
+	sk_msg_sg_copy(msg, start, true);
+}
+
+static inline void sk_msg_sg_copy_clear(struct sk_msg *msg, u32 start)
+{
+	sk_msg_sg_copy(msg, start, false);
 }
 
 static inline struct sk_psock *sk_psock(const struct sock *sk)
@@ -241,6 +293,11 @@ static inline void sk_psock_queue_msg(struct sk_psock *psock,
 				      struct sk_msg *msg)
 {
 	list_add_tail(&msg->list, &psock->ingress_msg);
+}
+
+static inline bool sk_psock_queue_empty(const struct sk_psock *psock)
+{
+	return psock ? list_empty(&psock->ingress_msg) : true;
 }
 
 static inline void sk_psock_report_error(struct sk_psock *psock, int err)
@@ -272,14 +329,6 @@ static inline void sk_psock_free_link(struct sk_psock_link *link)
 }
 
 struct sk_psock_link *sk_psock_link_pop(struct sk_psock *psock);
-#if defined(CONFIG_BPF_STREAM_PARSER)
-void sk_psock_unlink(struct sock *sk, struct sk_psock_link *link);
-#else
-static inline void sk_psock_unlink(struct sock *sk,
-				   struct sk_psock_link *link)
-{
-}
-#endif
 
 void __sk_psock_purge_ingress_msg(struct sk_psock *psock);
 
@@ -296,12 +345,25 @@ static inline void sk_psock_update_proto(struct sock *sk,
 					 struct sk_psock *psock,
 					 struct proto *ops)
 {
-	psock->saved_unhash = sk->sk_prot->unhash;
-	psock->saved_close = sk->sk_prot->close;
-	psock->saved_write_space = sk->sk_write_space;
+	/* Initialize saved callbacks and original proto only once, since this
+	 * function may be called multiple times for a psock, e.g. when
+	 * psock->progs.msg_parser is updated.
+	 *
+	 * Since we've not installed the new proto, psock is not yet in use and
+	 * we can initialize it without synchronization.
+	 */
+	if (!psock->sk_proto) {
+		struct proto *orig = READ_ONCE(sk->sk_prot);
 
-	psock->sk_proto = sk->sk_prot;
-	sk->sk_prot = ops;
+		psock->saved_unhash = orig->unhash;
+		psock->saved_close = orig->close;
+		psock->saved_write_space = sk->sk_write_space;
+
+		psock->sk_proto = orig;
+	}
+
+	/* Pairs with lockless read in sk_clone_lock() */
+	WRITE_ONCE(sk->sk_prot, ops);
 }
 
 static inline void sk_psock_restore_proto(struct sock *sk,
@@ -361,6 +423,19 @@ static inline void psock_set_prog(struct bpf_prog **pprog,
 		bpf_prog_put(prog);
 }
 
+static inline int psock_replace_prog(struct bpf_prog **pprog,
+				     struct bpf_prog *prog,
+				     struct bpf_prog *old)
+{
+	if (cmpxchg(pprog, old, prog) != old)
+		return -ENOENT;
+
+	if (old)
+		bpf_prog_put(old);
+
+	return 0;
+}
+
 static inline void psock_progs_drop(struct sk_psock_progs *progs)
 {
 	psock_set_prog(&progs->msg_parser, NULL);
@@ -368,4 +443,12 @@ static inline void psock_progs_drop(struct sk_psock_progs *progs)
 	psock_set_prog(&progs->skb_verdict, NULL);
 }
 
+int sk_psock_tls_strp_read(struct sk_psock *psock, struct sk_buff *skb);
+
+static inline bool sk_psock_strp_enabled(struct sk_psock *psock)
+{
+	if (!psock)
+		return false;
+	return psock->parser.enabled;
+}
 #endif /* _LINUX_SKMSG_H */

@@ -510,7 +510,6 @@ static u32 bbr_tso_segs(struct sock *sk, unsigned int mss_now)
 static u32 bbr_tso_segs_goal(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
-
 	return  bbr_tso_segs_generic(sk, tp->mss_cache, GSO_LEGACY_MAX_SIZE);
 }
 

@@ -47,7 +47,7 @@
 #include <linux/version.h>
 #include <linux/wait.h>
 
-#if KERNEL_VERSION(5, 1, 0) <= LINUX_VERSION_CODE
+#if KERNEL_VERSION(4, 19, 0) <= LINUX_VERSION_CODE
 #include <linux/build_bug.h>
 #else
 // Stringify the expression if no message is given.

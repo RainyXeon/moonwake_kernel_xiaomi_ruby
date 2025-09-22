@@ -650,7 +650,8 @@ IMG_INT OSMemCmp(void *pvBufA, void *pvBufB, size_t uiLen);
 @Return         PVRSRV_OK on success, a failure code otherwise.
 *****************************************************************************/
 PVRSRV_ERROR OSPhyContigPagesAlloc(PVRSRV_DEVICE_NODE *psDevNode, size_t uiSize,
-							PG_HANDLE *psMemHandle, IMG_DEV_PHYADDR *psDevPAddr);
+							PG_HANDLE *psMemHandle, IMG_DEV_PHYADDR *psDevPAddr,
+							IMG_PID uiPid);
 
 /*************************************************************************/ /*!
 @Function       OSPhyContigPagesFree

@@ -31,6 +31,7 @@
 #include <uapi/gpu/arm/midgard/csf/mali_gpu_csf_registers.h>
 #include <uapi/gpu/arm/midgard/mali_base_kernel.h>
 #include <mali_kbase_hwaccess_time.h>
+#include "mali_kbase_csf_mcu_shared_reg.h"
 
 /* Value to indicate that a queue group is not groups_to_schedule list */
 #define KBASEP_GROUP_PREPARED_SEQ_NUM_INVALID (U32_MAX)
@@ -925,6 +926,7 @@ int kbase_csf_scheduler_queue_stop(struct kbase_queue *queue)
 			err = sched_halt_stream(queue);
 
 		unassign_user_doorbell_from_queue(kbdev, queue);
+		kbase_csf_mcu_shared_drop_stopped_queue(kbdev, queue);
 	}
 
 	mutex_unlock(&kbdev->csf.scheduler.lock);
@@ -1034,13 +1036,13 @@ static void program_cs(struct kbase_device *kbdev,
 	kbase_csf_firmware_cs_input(stream, CS_SIZE,
 				    queue->size);
 
-	user_input = (queue->reg->start_pfn << PAGE_SHIFT);
+	user_input = queue->user_io_gpu_va;
 	kbase_csf_firmware_cs_input(stream, CS_USER_INPUT_LO,
 				    user_input & 0xFFFFFFFF);
 	kbase_csf_firmware_cs_input(stream, CS_USER_INPUT_HI,
 				    user_input >> 32);
 
-	user_output = ((queue->reg->start_pfn + 1) << PAGE_SHIFT);
+	user_output = user_input + PAGE_SIZE;
 	kbase_csf_firmware_cs_input(stream, CS_USER_OUTPUT_LO,
 				    user_output & 0xFFFFFFFF);
 	kbase_csf_firmware_cs_input(stream, CS_USER_OUTPUT_HI,
@@ -1074,6 +1076,20 @@ static void program_cs(struct kbase_device *kbdev,
 	kbase_csf_ring_cs_kernel_doorbell(kbdev, csi_index, group->csg_nr,
 					  ring_csg_doorbell);
 	update_hw_active(queue, true);
+}
+
+static int onslot_csg_add_new_queue(struct kbase_queue *queue)
+{
+	struct kbase_device *kbdev = queue->kctx->kbdev;
+	int err;
+
+	lockdep_assert_held(&kbdev->csf.scheduler.lock);
+
+	err = kbase_csf_mcu_shared_add_queue(kbdev, queue);
+	if (!err)
+		program_cs(kbdev, queue, true);
+
+	return err;
 }
 
 int kbase_csf_scheduler_queue_start(struct kbase_queue *queue)
@@ -1124,8 +1140,15 @@ int kbase_csf_scheduler_queue_start(struct kbase_queue *queue)
 					 * user door-bell on such a case.
 					 */
 					kbase_csf_ring_cs_user_doorbell(kbdev, queue);
-				} else
-					program_cs(kbdev, queue, true);
+				} else {
+					err = onslot_csg_add_new_queue(queue);
+
+					if (unlikely(err)) {
+						queue->enabled = false;
+						mutex_unlock(&kbdev->csf.scheduler.lock);
+						return err;
+					}
+				}
 			}
 			queue_delayed_work(system_long_wq,
 				&kbdev->csf.scheduler.ping_work,
@@ -1894,6 +1917,11 @@ static bool cleanup_csg_slot(struct kbase_queue_group *group)
 	KBASE_TLSTREAM_TL_KBASE_DEVICE_DEPROGRAM_CSG(kbdev,
 		kbdev->gpu_props.props.raw_props.gpu_id, slot);
 
+	/* Lazy unbinding. Notify that the group is off-slot and the csg_reg might
+	 * be made available for reuse by other groups.
+	 */
+	kbase_csf_mcu_shared_set_group_csg_reg_unused(kbdev, group);
+
 	return as_fault;
 }
 
@@ -1977,8 +2005,8 @@ static void program_csg_slot(struct kbase_queue_group *group, s8 slot,
 	u32 state;
 	int i;
 	unsigned long flags;
-	const u64 normal_suspend_buf =
-		group->normal_suspend_buf.reg->start_pfn << PAGE_SHIFT;
+	u64 normal_suspend_buf;
+	u64 protm_suspend_buf;
 	struct kbase_csf_csg_slot *csg_slot =
 		&kbdev->csf.scheduler.csg_slots[slot];
 
@@ -1989,6 +2017,19 @@ static void program_csg_slot(struct kbase_queue_group *group, s8 slot,
 		return;
 
 	WARN_ON(atomic_read(&csg_slot->state) != CSG_SLOT_READY);
+
+	if (unlikely(kbase_csf_mcu_shared_group_bind_csg_reg(kbdev, group))) {
+		dev_err(kbdev->dev,
+			"Couldn't bind MCU shared csg_reg for group %d of context %d_%d, slot=%d",
+			group->handle, group->kctx->tgid, kctx->id, slot);
+		kbase_csf_mcu_shared_set_group_csg_reg_unused(kbdev, group);
+		return;
+	}
+
+	/* The suspend buf has already been mapped through binding to csg_reg */
+	normal_suspend_buf = group->normal_suspend_buf.gpu_va;
+	protm_suspend_buf = group->protected_suspend_buf.gpu_va;
+	WARN_ONCE(!normal_suspend_buf, "Normal suspend buffer not mapped");
 
 	ginfo = &global_iface->groups[slot];
 
@@ -2001,7 +2042,8 @@ static void program_csg_slot(struct kbase_queue_group *group, s8 slot,
 
 	if (kctx->as_nr == KBASEP_AS_NR_INVALID) {
 		dev_warn(kbdev->dev, "Could not get a valid AS for group %d of context %d_%d on slot %d\n",
-			 group->handle, kctx->tgid, kctx->id, slot);
+				group->handle, kctx->tgid, kctx->id, slot);
+		kbase_csf_mcu_shared_set_group_csg_reg_unused(kbdev, group);
 		return;
 	}
 
@@ -2049,15 +2091,12 @@ static void program_csg_slot(struct kbase_queue_group *group, s8 slot,
 	kbase_csf_firmware_csg_input(ginfo, CSG_SUSPEND_BUF_HI,
 			normal_suspend_buf >> 32);
 
-	if (group->protected_suspend_buf.reg) {
-		const u64 protm_suspend_buf =
-			group->protected_suspend_buf.reg->start_pfn <<
-				PAGE_SHIFT;
-		kbase_csf_firmware_csg_input(ginfo, CSG_PROTM_SUSPEND_BUF_LO,
-			protm_suspend_buf & U32_MAX);
-		kbase_csf_firmware_csg_input(ginfo, CSG_PROTM_SUSPEND_BUF_HI,
-			protm_suspend_buf >> 32);
-	}
+	/* Note: right now, the GPU VA mapping associated with the protected
+	 * suspend buffer is mapped to dummy physical pages. The mapping shall
+	 * be updated to actual physical pages upon protected mode entry.
+	 */
+	kbase_csf_firmware_csg_input(ginfo, CSG_PROTM_SUSPEND_BUF_LO, protm_suspend_buf & U32_MAX);
+	kbase_csf_firmware_csg_input(ginfo, CSG_PROTM_SUSPEND_BUF_HI, protm_suspend_buf >> 32);
 
 	/* Enable all interrupts for now */
 	kbase_csf_firmware_csg_input(ginfo, CSG_ACK_IRQ_MASK, ~((u32)0));
@@ -2102,6 +2141,9 @@ static void program_csg_slot(struct kbase_queue_group *group, s8 slot,
 
 	/* Programming a slot consumes a group from scanout */
 	update_offslot_non_idle_cnt_for_onslot_grp(group);
+
+	/* Notify the group's bound csg_reg is now in active use */
+	kbase_csf_mcu_shared_set_group_csg_reg_active(kbdev, group);
 }
 
 static void remove_scheduled_group(struct kbase_device *kbdev,
@@ -2171,6 +2213,9 @@ static void sched_evict_group(struct kbase_queue_group *group, bool fault,
 		/* Notify a group has been evicted */
 		wake_up_all(&kbdev->csf.event_wait);
 	}
+
+	/* Clear all the bound shared regions and unmap any in-place MMU maps */
+	kbase_csf_mcu_shared_clear_evicted_group_csg_reg(kbdev, group);
 }
 
 static int term_group_sync(struct kbase_queue_group *group)
@@ -4224,8 +4269,11 @@ static int suspend_active_queue_groups_on_reset(struct kbase_device *kbdev)
 	 * due to the extra context ref-count, which prevents the
 	 * L2 powering down cache clean operation in the non racing
 	 * case.
+	 * LSC is being flushed together to cover buslogging usecase,
+	 * where GPU reset is done regularly to avoid the log buffer
+	 * overflow.
 	 */
-	kbase_gpu_start_cache_clean(kbdev);
+	kbase_gpu_start_cache_clean(kbdev, GPU_COMMAND_CACHE_CLN_INV_L2_LSC);
 	ret2 = kbase_gpu_wait_cache_clean_timeout(kbdev,
 			kbdev->reset_timeout_ms);
 	if (ret2) {
@@ -4511,10 +4559,13 @@ int kbase_csf_scheduler_group_copy_suspend_buf(struct kbase_queue_group *group,
 
 		if (scheduler->state != SCHED_SUSPENDED) {
 			/* Similar to the case of HW counters, need to flush
-			 * the GPU cache before reading from the suspend buffer
+			 * the GPU L2 cache before reading from the suspend buffer
 			 * pages as they are mapped and cached on GPU side.
+			 * Flushing LSC is not done here, since only the flush of
+			 * CSG suspend buffer contents is needed from the L2 cache.
 			 */
-			kbase_gpu_start_cache_clean(kbdev);
+			kbase_gpu_start_cache_clean(
+				kbdev, GPU_COMMAND_CACHE_CLN_INV_L2);
 			kbase_gpu_wait_cache_clean(kbdev);
 		} else {
 			/* Make sure power down transitions have completed,
@@ -4954,6 +5005,7 @@ int kbase_csf_scheduler_init(struct kbase_device *kbdev)
 {
 	struct kbase_csf_scheduler *scheduler = &kbdev->csf.scheduler;
 	u32 num_groups = kbdev->csf.global_iface.group_num;
+	int err;
 
 	bitmap_zero(scheduler->csg_inuse_bitmap, num_groups);
 	bitmap_zero(scheduler->csg_slots_idle_mask, num_groups);
@@ -4966,7 +5018,13 @@ int kbase_csf_scheduler_init(struct kbase_device *kbdev)
 		return -ENOMEM;
 	}
 
-	return 0;
+	err = kbase_csf_mcu_shared_regs_data_init(kbdev);
+	if (err) {
+		dev_err(kbdev->dev, "Failed to initialize MCU shared region data");
+		kfree(scheduler->csg_slots);
+	}
+
+	return err;
 }
 
 int kbase_csf_scheduler_early_init(struct kbase_device *kbdev)
@@ -5039,6 +5097,12 @@ void kbase_csf_scheduler_term(struct kbase_device *kbdev)
 		kfree(kbdev->csf.scheduler.csg_slots);
 		kbdev->csf.scheduler.csg_slots = NULL;
 	}
+
+	/* Although MCU shared region data was the last item to be initialized,
+	 * it can be terminated only after all resources associated with CSG slots
+	 * have been released.
+	 */
+	kbase_csf_mcu_shared_regs_data_term(kbdev);
 }
 
 void kbase_csf_scheduler_early_term(struct kbase_device *kbdev)

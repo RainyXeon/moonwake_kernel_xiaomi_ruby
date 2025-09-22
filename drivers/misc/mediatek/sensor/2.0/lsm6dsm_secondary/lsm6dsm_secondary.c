@@ -95,7 +95,7 @@ static void lsm6dsm_sample_complete(void *ctx)
 		(driver_dev->async_rx_buffer[4]));
 	coordinate_map(driver_dev->direction, data);
 	memset(&event, 0, sizeof(struct hf_manager_event));
-	event.timestamp = ktime_get_boot_ns();
+	event.timestamp = ktime_get_boottime_ns();
 	event.sensor_type = SENSOR_TYPE_GYRO_SECONDARY;
 	event.accurancy = SENSOR_ACCURANCY_HIGH;
 	event.action = DATA_ACTION;

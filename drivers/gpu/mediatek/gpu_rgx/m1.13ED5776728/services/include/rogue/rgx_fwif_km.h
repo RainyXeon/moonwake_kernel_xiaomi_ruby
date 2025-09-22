@@ -49,6 +49,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgxdefs_km.h"
 #include "dllist.h"
 #include "rgx_hwperf.h"
+#include "rgxheapconfig.h"
 
 
 /*************************************************************************/ /*!
@@ -761,6 +762,7 @@ typedef struct RGXFWIF_FWCOMMONCONTEXT_
 	IMG_UINT32				ui32FWComCtxFlags;
 	IMG_UINT32				ui32Priority;
 	IMG_UINT32				ui32PrioritySeqNum;
+	IMG_UINT32              ui32ServiceCount;
 
 	/* References to the host side originators */
 	IMG_UINT32				ui32ServerCommonContextID;			/*!< the Server Common Context */

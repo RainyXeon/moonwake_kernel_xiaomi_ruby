@@ -297,6 +297,7 @@ X(194, RGXFW_GROUP_MAIN, RGXFW_SF_MAIN_ECC_FAULT, "ECC fault GPU=0x%08x FW=0x%08
 X(195, RGXFW_GROUP_MAIN, RGXFW_SF_MAIN_PROCESS_XPU_EVENT, "Processing XPU event on DM = %d", 1) \
 X(196, RGXFW_GROUP_MAIN, RGXFW_SF_MAIN_VZ_WDG_TRIGGER, "OSid %u failed to respond to the virtualisation watchdog in time. Timestamp of its last input = %u", 2) \
 X(197, RGXFW_GROUP_MAIN, RGXFW_SF_MAIN_HWR_HIT_LOCKUP, "GPU-%d has locked up (see HWR logs for more info)", 1) \
+X(198, RGXFW_GROUP_MAIN, RGXFW_SF_MAIN_ZERO_LM, "Zeroing local memory after context storing FWCtx = 0x%08.8x", 1) \
 \
 X(  1, RGXFW_GROUP_MTS, RGXFW_SF_MTS_BG_KICK_DEPRECATED, "Bg Task DM = %u, counted = %d", 2) \
 X(  2, RGXFW_GROUP_MTS, RGXFW_SF_MTS_BG_COMPLETE_DEPRECATED, "Bg Task complete DM = %u", 1) \
@@ -722,6 +723,12 @@ X( 73, RGXFW_GROUP_HWR, RGXFW_SF_HWR_DEADLINE_CHECK, "DM%u has taken %d ticks an
 X( 74, RGXFW_GROUP_HWR, RGXFW_SF_HWR_WATCHDOG_CHECK, "USC Watchdog result for DM%u is HWRNeeded=%u Status=%u USCs={0x%x} with HWRChecksToGo=%u", 5) \
 X( 75, RGXFW_GROUP_HWR, RGXFW_SF_HWR_FL_RECON_NEEDED, "Reconstruction needed for freelist 0x%x (ID=%d) OSid: %d type: %d (0:local,1:global) phase: %d (0:TA, 1:3D) on HW context %u", 6) \
 X( 76, RGXFW_GROUP_HWR, RGXFW_SF_HWR_SET_LOCKUP, "GPU-%d has locked up", 1) \
+X( 90, RGXFW_GROUP_HWR, RGXFW_SF_HWR_HWR_FAULT_POLL_BIF_PFS, "After FW fault was raised, BIF_PFS poll failed on core %d with value 0x%08x", 2) \
+X( 91, RGXFW_GROUP_HWR, RGXFW_SF_HWR_HWR_FAULT_POLL_SET_ABORT_PM_STATUS, "After FW fault was raised, MMU_ABORT_PM_STATUS set poll failed on core %d with value 0x%08x", 2) \
+X( 92, RGXFW_GROUP_HWR, RGXFW_SF_HWR_HWR_FAULT_POLL_UNSET_ABORT_PM_STATUS, "After FW fault was raised, MMU_ABORT_PM_STATUS unset poll failed on core %d with value 0x%08x", 2) \
+X( 93, RGXFW_GROUP_HWR, RGXFW_SF_HWR_HWR_FAULT_POLL_SLC_INVAL, "After FW fault was raised, MMU_CTRL_INVAL poll (all but fw) failed on core %d with value 0x%08x", 2) \
+X( 94, RGXFW_GROUP_HWR, RGXFW_SF_HWR_HWR_FAULT_POLL_SLCMMU_INVAL, "After FW fault was raised, MMU_CTRL_INVAL poll (all) failed on core %d with value 0x%08x", 2) \
+X( 95, RGXFW_GROUP_HWR, RGXFW_SF_HWR_HWR_FAULT_POLL_BIF_TEXAS_PFS, "After FW fault was raised, TEXAS%d_PFS poll failed on core %d with value 0x%08x", 3) \
 \
 X(  1, RGXFW_GROUP_HWP, RGXFW_SF_HWP_I_CFGBLK, "Block 0x%x mapped to Config Idx %u", 2) \
 X(  2, RGXFW_GROUP_HWP, RGXFW_SF_HWP_I_OMTBLK, "Block 0x%x omitted from event - not enabled in HW", 1) \

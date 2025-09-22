@@ -782,7 +782,12 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 	IMG_UINT32 ui32ECCRAMErrInjInterval;
 #endif
 
-	IMG_UINT32              ui32Log2Non4KPgSize; /* Page size of Non4k heap in log2 form */
+#if defined(SUPPORT_SECURE_ALLOC_KM)
+	PMR						*psGenHeapSecMem;		/*!< An allocation of secure memory mapped to
+													  the general devmem heap. The allocation is
+													  created and mapped at driver init. It's used for
+													  various purposes. See rgx_fwif_km.h for all use cases. */
+#endif
 } PVRSRV_RGXDEV_INFO;
 
 

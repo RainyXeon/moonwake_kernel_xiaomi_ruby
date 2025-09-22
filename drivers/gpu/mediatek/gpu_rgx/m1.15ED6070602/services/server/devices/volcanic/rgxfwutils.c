@@ -1039,6 +1039,7 @@ PVRSRV_ERROR FWCommonContextAllocate(CONNECTION_DATA *psConnection,
 
 	psFWCommonContext = (RGXFWIF_FWCOMMONCONTEXT *) (pui8Ptr + ui32FWCommonContextOffset);
 	psFWCommonContext->eDM = eDM;
+	BITMASK_SET(psFWCommonContext->ui32MiscFlags, RGXFWIF_CONTEXT_MISC_FLAGS_HAS_DEFER_COUNT);
 
 	/* Set the firmware CCB device addresses in the firmware common context */
 	eError = RGXSetFirmwareAddress(&psFWCommonContext->psCCB,
@@ -4460,10 +4461,20 @@ PVRSRV_ERROR RGXScheduleCommandAndGetKCCBSlot(PVRSRV_RGXDEV_INFO	*psDevInfo,
 	 * sequence below is accessing the HW registers.
 	 */
 	if (unlikely((psDevInfo == NULL) ||
-	             (psDevInfo->psDeviceNode == NULL) ||
-	             (psDevInfo->psDeviceNode->eDevState == PVRSRV_DEVICE_STATE_DEINIT)))
+	             (psDevInfo->psDeviceNode == NULL)))
 	{
 		return PVRSRV_ERROR_INVALID_DEVICE;
+	}
+
+	/* Don't send the command/power up request if device in deinit phase.
+	 * The de-init thread could destroy the device whilst the power up
+	 * sequence below is accessing the HW registers.
+	 * Not yet safe to free resources. Caller should retry later.
+	 */
+	if (psDevInfo->psDeviceNode->eDevState == PVRSRV_DEVICE_STATE_DEINIT ||
+	    psDevInfo->psDeviceNode->eDevState == PVRSRV_DEVICE_STATE_DESTRUCTING)
+	{
+		return PVRSRV_ERROR_RETRY;
 	}
 
 	eError = CacheOpFence(eKCCBType, ui32CacheOpFence);
@@ -4486,7 +4497,8 @@ PVRSRV_ERROR RGXScheduleCommandAndGetKCCBSlot(PVRSRV_RGXDEV_INFO	*psDevInfo,
 		goto RGXScheduleCommand_exit;
 	}
 
-	if (unlikely(psDevInfo->psDeviceNode->eDevState == PVRSRV_DEVICE_STATE_DEINIT))
+	if (unlikely(psDevInfo->psDeviceNode->eDevState == PVRSRV_DEVICE_STATE_DEINIT ||
+	             psDevInfo->psDeviceNode->eDevState == PVRSRV_DEVICE_STATE_DESTRUCTING))
 	{
 		/* If we have the power lock the device is valid but the deinit
 		 * thread could be waiting for the lock. */
@@ -5971,7 +5983,8 @@ PVRSRV_ERROR RGXUpdateHealthStatus(PVRSRV_DEVICE_NODE* psDevNode,
 
 	/* If the firmware is not yet initialised or has already deinitialised, stop here */
 	if (psDevInfo  == NULL || !psDevInfo->bFirmwareInitialised || psDevInfo->pvRegsBaseKM == NULL ||
-		psDevInfo->psDeviceNode == NULL || psDevInfo->psDeviceNode->eDevState == PVRSRV_DEVICE_STATE_DEINIT)
+		psDevInfo->psDeviceNode == NULL || psDevInfo->psDeviceNode->eDevState == PVRSRV_DEVICE_STATE_DEINIT ||
+		psDevInfo->psDeviceNode->eDevState == PVRSRV_DEVICE_STATE_DESTRUCTING)
 	{
 		return PVRSRV_OK;
 	}
@@ -6283,7 +6296,8 @@ void RGXUpdateAutoVzWatchdog(PVRSRV_DEVICE_NODE* psDevNode)
 		PVRSRV_RGXDEV_INFO *psDevInfo = psDevNode->pvDevice;
 
 		if (unlikely((psDevInfo  == NULL || !psDevInfo->bFirmwareInitialised || !psDevInfo->bRGXPowered ||
-			psDevInfo->pvRegsBaseKM == NULL || psDevNode->eDevState == PVRSRV_DEVICE_STATE_DEINIT)))
+					  psDevInfo->pvRegsBaseKM == NULL || psDevNode->eDevState == PVRSRV_DEVICE_STATE_DEINIT ||
+					  psDevNode->eDevState == PVRSRV_DEVICE_STATE_DESTRUCTING)))
 		{
 			/* If the firmware is not initialised, stop here */
 			return;

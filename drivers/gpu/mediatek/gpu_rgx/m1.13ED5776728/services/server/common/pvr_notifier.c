@@ -510,6 +510,15 @@ PVRSRVDebugRequest(PVRSRV_DEVICE_NODE *psDevNode,
 
 	PVR_DUMPDEBUG_LOG("Window system: %s", (IS_DECLARED(WINDOW_SYSTEM)) ? (WINDOW_SYSTEM) : "Not declared");
 
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+	OSLockAcquire(psDevNode->hPMRZombieListLock);
+	PVR_DUMPDEBUG_LOG("PMR Zombie Count: %u, PMR Zombie Count In Cleanup: %u",
+	                  psDevNode->uiPMRZombieCount,
+	                  psDevNode->uiPMRZombieCountInCleanup);
+	OSLockRelease(psDevNode->hPMRZombieListLock);
+#endif
+	PVR_DUMPDEBUG_LOG("PMR Live Count: %d", PMRGetLiveCount());
+
 	/* For each requester */
 	for (i = 0; i < psDebugTable->ui32RequestCount; i++)
 	{
