@@ -2,6 +2,7 @@
 /*
  * Copyright (c) 2021 MediaTek Inc.
 */
+#include <linux/device.h>
 
 #ifndef __MTK_CHARGER_TYPE_H__
 #define __MTK_CHARGER_TYPE_H__
