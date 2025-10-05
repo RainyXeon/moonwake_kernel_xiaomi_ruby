@@ -60,7 +60,7 @@ static int seq_show(struct seq_file *m, void *v)
 		return ret;
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	mnt = real_mount(file->f_path.mnt);
-	if (likely(susfs_is_current_non_root_user_app_proc()) &&
+	if (likely(susfs_is_current_proc_umounted()) &&
 			mnt->mnt_id >= DEFAULT_SUS_MNT_ID) {
 		for (; mnt->mnt_id >= DEFAULT_SUS_MNT_ID; mnt = mnt->mnt_parent) { }
 	}
