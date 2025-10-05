@@ -354,16 +354,16 @@ void susfs_run_sus_path_loop(uid_t uid) {
 }
 
 static inline bool is_i_uid_in_android_data_not_allowed(uid_t i_uid) {
-	return (likely(susfs_is_current_non_root_user_app_proc()) &&
+	return (likely(susfs_is_current_proc_umounted()) &&
 		unlikely(current_uid().val != i_uid));
 }
 
 static inline bool is_i_uid_in_sdcard_not_allowed(void) {
-	return (likely(susfs_is_current_non_root_user_app_proc()));
+	return (likely(susfs_is_current_proc_umounted()));
 }
 
 static inline bool is_i_uid_not_allowed(uid_t i_uid) {
-	return (likely(susfs_is_current_non_root_user_app_proc()) &&
+	return (likely(susfs_is_current_proc_umounted()) &&
 		unlikely(current_uid().val != i_uid));
 }
 

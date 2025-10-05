@@ -37,6 +37,7 @@
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 extern bool susfs_is_current_ksu_domain(void);
 extern bool susfs_is_current_zygote_domain(void);
+extern bool susfs_is_boot_completed_triggered;
 
 static DEFINE_IDA(susfs_mnt_id_ida);
 static DEFINE_IDA(susfs_mnt_group_ida);
@@ -3927,6 +3928,27 @@ const struct proc_ns_operations mntns_operations = {
 	.install	= mntns_install,
 	.owner		= mntns_owner,
 };
+
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+/* Reorder the mnt_id after all sus mounts are umounted during ksu_handle_setuid() */
+void susfs_reorder_mnt_id(void) {
+	struct mnt_namespace *mnt_ns = current->nsproxy->mnt_ns;
+	struct mount *mnt;
+	int first_mnt_id = 0;
+
+	if (!mnt_ns) {
+		return;
+	}
+
+	get_mnt_ns(mnt_ns);
+	first_mnt_id = list_first_entry(&mnt_ns->list, struct mount, mnt_list)->mnt_id;
+	list_for_each_entry(mnt, &mnt_ns->list, mnt_list) {
+		mnt->mnt.susfs_mnt_id_backup = mnt->mnt_id;
+		mnt->mnt_id = first_mnt_id++;
+	}
+	put_mnt_ns(mnt_ns);
+}
+#endif
 
 #ifdef CONFIG_KSU_SUSFS
 bool susfs_is_mnt_devname_ksu(struct path *path) {
