@@ -32,17 +32,12 @@
 #define TRY_UMOUNT_DEFAULT 0 /* used by susfs_try_umount() */
 #define TRY_UMOUNT_DETACH 1 /* used by susfs_try_umount() */
 
-<<<<<<< HEAD
-#define DEFAULT_SUS_MNT_ID 100000 /* used by mount->mnt_id */
-=======
 #define SUS_SU_DISABLED 0
 #define SUS_SU_WITH_OVERLAY 1 /* deprecated */
 #define SUS_SU_WITH_HOOKS 2
 
-#define DEFAULT_SUS_MNT_ID 300000 /* used by mount->mnt_id */
->>>>>>> 355c5525e9dc (FROMGIT: susfs: Bump version to v1.5.11 latest)
-#define DEFAULT_SUS_MNT_ID_FOR_KSU_PROC_UNSHARE 1000000 /* used by vfsmount->susfs_mnt_id_backup */
-#define DEFAULT_SUS_MNT_GROUP_ID 3000 /* used by mount->mnt_group_id */
+#define DEFAULT_KSU_MNT_ID 300000 /* used by mount->mnt_id */
+#define DEFAULT_KSU_MNT_GROUP_ID 3000 /* used by mount->mnt_group_id */
 
 /*
  * mount->mnt.susfs_mnt_id_backup => storing original mnt_id of normal mounts or custom sus mnt_id of sus mounts
@@ -51,15 +46,8 @@
  * nd->flags => storing flag 'ND_FLAGS_'
  * task_struct->thread_info.flags => storing flag 'TIF_'
  */
-<<<<<<< HEAD
-
-// thread_info->flags is unsigned long :D
-#define TIF_NON_ROOT_USER_APP_PROC 33
-=======
  // thread_info->flags is unsigned long :D
 #define TIF_PROC_UMOUNTED 33
->>>>>>> 355c5525e9dc (FROMGIT: susfs: Bump version to v1.5.11 latest)
-
 #define AS_FLAGS_SUS_PATH 24
 #define AS_FLAGS_SUS_MOUNT 25
 #define AS_FLAGS_SUS_KSTAT 26
