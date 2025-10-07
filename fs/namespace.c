@@ -258,13 +258,9 @@ static struct mount *susfs_reuse_sus_vfsmnt(const char *name, int orig_mnt_id)
 			mnt->mnt_devname = kstrdup_const(name,
 							 GFP_KERNEL_ACCOUNT);
 			if (!mnt->mnt_devname)
+				goto out_free_cache;
 		}
 
-		if (name) {
-			mnt->mnt_devname = kstrdup_const(name, GFP_KERNEL);
-			if (!mnt->mnt_devname)
-				goto out_free_id;
-		}
 
 #ifdef CONFIG_SMP
 		mnt->mnt_pcp = alloc_percpu(struct mnt_pcp);
@@ -312,16 +308,13 @@ static struct mount *susfs_alloc_sus_vfsmnt(const char *name)
 {
 	struct mount *mnt = kmem_cache_zalloc(mnt_cache, GFP_KERNEL);
 	if (mnt) {
-		int err;
-
-		err = susfs_mnt_alloc_id(mnt);
-		if (err)
-			goto out_free_cache;
+		mnt->mnt_id = DEFAULT_KSU_MNT_ID;
 
 		if (name) {
-			mnt->mnt_devname = kstrdup_const(name, GFP_KERNEL);
+			mnt->mnt_devname = kstrdup_const(name,
+							 GFP_KERNEL_ACCOUNT);
 			if (!mnt->mnt_devname)
-				goto out_free_id;
+				goto out_free_cache;
 		}
 
 #ifdef CONFIG_SMP
@@ -1278,10 +1271,7 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 	if (susfs_is_current_ksu_domain()) {
 		// if it is unsharing, we reuse the old->mnt_id
 		if (flag & CL_COPY_MNT_NS) {
-			mnt = susfs_alloc_sus_vfsmnt(old->mnt_devname);
-			ida_free(&susfs_ksu_mnt_id_ida, mnt->mnt_id);
-			mnt->mnt_id = old->mnt_id;
-			mnt->mnt.susfs_mnt_id_backup = DEFAULT_KSU_MNT_ID;
+			mnt = susfs_reuse_sus_vfsmnt(old->mnt_devname, old->mnt_id);
 			goto bypass_orig_flow;
 		}
 		// else we just go assign fake mnt_id
