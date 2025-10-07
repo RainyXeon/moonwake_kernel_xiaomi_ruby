@@ -549,7 +549,6 @@ int susfs_auto_add_sus_bind_mount(const char *pathname, struct path *path_target
 	mnt = real_mount(path_target->mnt);
 	if (mnt->mnt_group_id > 0 && // 0 means no peer group
 		mnt->mnt_group_id < DEFAULT_KSU_MNT_GROUP_ID) {
-		SUSFS_LOGE("skip setting SUS_MOUNT inode state for path '%s' since its source mount has a legit peer group id\n", pathname);
 		// return 0 here as we still want it to be added to try_umount list
 		return 0;
 	}
@@ -881,9 +880,8 @@ void susfs_auto_add_try_umount_for_bind_mount(struct path *path) {
 	struct st_susfs_try_umount_list *cursor = NULL, *temp = NULL;
 	struct st_susfs_try_umount_list *new_list = NULL;
 	char *pathname = NULL, *dpath = NULL;
-#ifdef CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT
-	bool is_magic_mount_path = false;
-#endif
+	size_t new_pathname_len = 0;
+	bool is_magic_mount = false;
 
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 	if (path->dentry->d_inode->i_mapping->flags & BIT_SUS_KSTAT) {
@@ -904,19 +902,30 @@ void susfs_auto_add_try_umount_for_bind_mount(struct path *path) {
 		goto out_free_pathname;
 	}
 
-#ifdef CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT
-	if (strstr(dpath, MAGIC_MOUNT_WORKDIR)) {
-		is_magic_mount_path = true;
-	}
-#endif
-
-	list_for_each_entry_safe(cursor, temp, &LH_TRY_UMOUNT_PATH, list) {
-#ifdef CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT
-		if (is_magic_mount_path && strstr(dpath, cursor->info.target_pathname)) {
-			goto out_free_pathname;
+	// - Important to check if it is from a magic mount, if so, then we need only
+	//   the path which is directory only, others should be skipped.
+	// - We need to strip out "/debug_ramdisk/workdir" here since there will be
+	//   no "/debug_ramdisk/workdir" prefixed in zygote mnt ns
+	if (!strncmp(dpath, "/debug_ramdisk/workdir/", 23)) {
+		if (path->dentry->d_inode && S_ISDIR(path->dentry->d_inode->i_mode)) {
+			new_pathname_len = strlen(dpath) - 22;
+			memmove(dpath, dpath+22, new_pathname_len);
+			*(dpath + new_pathname_len) = '\0';
+			is_magic_mount = true;
+			goto check_duplicated_list_head;
 		}
-#endif
-		if (unlikely(!strcmp(dpath, cursor->info.target_pathname))) {
+		goto out_free_pathname;
+	}
+
+check_duplicated_list_head:
+	list_for_each_entry_safe(cursor, temp, &LH_TRY_UMOUNT_PATH, list) {
+		if (is_magic_mount) {
+			if (!strncmp(dpath, cursor->info.target_pathname, strlen(cursor->info.target_pathname))) {
+				SUSFS_LOGE("target_pathname: '%s', ino: %lu, is already created in LH_TRY_UMOUNT_PATH\n",
+								dpath, path->dentry->d_inode->i_ino);
+				goto out_free_pathname;
+			}
+		} else if (unlikely(!strcmp(dpath, cursor->info.target_pathname))) {
 			SUSFS_LOGE("target_pathname: '%s', ino: %lu, is already created in LH_TRY_UMOUNT_PATH\n",
 							dpath, path->dentry->d_inode->i_ino);
 			goto out_free_pathname;
@@ -929,17 +938,7 @@ void susfs_auto_add_try_umount_for_bind_mount(struct path *path) {
 		goto out_free_pathname;
 	}
 
-#ifdef CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT
-	if (is_magic_mount_path) {
-		strncpy(new_list->info.target_pathname, dpath + strlen(MAGIC_MOUNT_WORKDIR), SUSFS_MAX_LEN_PATHNAME-1);
-		goto out_add_to_list;
-	}
-#endif
 	strncpy(new_list->info.target_pathname, dpath, SUSFS_MAX_LEN_PATHNAME-1);
-
-#ifdef CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT
-out_add_to_list:
-#endif
 
 	new_list->info.mnt_mode = TRY_UMOUNT_DETACH;
 
@@ -1145,6 +1144,61 @@ struct filename* susfs_get_redirected_path(unsigned long ino) {
 }
 #endif // #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 
+/* sus_su */
+#ifdef CONFIG_KSU_SUSFS_SUS_SU
+extern int susfs_sus_su_working_mode;
+extern void ksu_susfs_enable_sus_su(void);
+extern void ksu_susfs_disable_sus_su(void);
+
+int susfs_get_sus_su_working_mode(void) {
+	return susfs_sus_su_working_mode;
+}
+
+int susfs_sus_su(struct st_sus_su* __user user_info) {
+	struct st_sus_su info;
+	int last_working_mode = susfs_sus_su_working_mode;
+
+	if (copy_from_user(&info, user_info, sizeof(struct st_sus_su))) {
+		SUSFS_LOGE("failed copying from userspace\n");
+		return 1;
+	}
+
+	if (info.mode == SUS_SU_WITH_HOOKS) {
+		if (last_working_mode == SUS_SU_WITH_HOOKS) {
+			SUSFS_LOGE("current sus_su mode is already %d\n", SUS_SU_WITH_HOOKS);
+			return 1;
+		}
+		if (last_working_mode != SUS_SU_DISABLED) {
+			SUSFS_LOGE("please make sure the current sus_su mode is %d first\n", SUS_SU_DISABLED);
+			return 2;
+		}
+		ksu_susfs_enable_sus_su();
+		SUSFS_LOGI("core kprobe hooks for ksu are disabled!\n");
+		SUSFS_LOGI("non-kprobe hook sus_su is enabled!\n");
+		SUSFS_LOGI("sus_su mode: %d\n", SUS_SU_WITH_HOOKS);
+		return 0;
+	} else if (info.mode == SUS_SU_DISABLED) {
+		if (last_working_mode == SUS_SU_DISABLED) {
+			SUSFS_LOGE("current sus_su mode is already %d\n", SUS_SU_DISABLED);
+			return 1;
+		}
+		ksu_susfs_disable_sus_su();
+		if (last_working_mode == SUS_SU_WITH_HOOKS) {
+			SUSFS_LOGI("core kprobe hooks for ksu are enabled!\n");
+			goto out;
+		}
+out:
+		if (copy_to_user(user_info, &info, sizeof(info)))
+			SUSFS_LOGE("copy_to_user() failed\n");
+		return 0;
+	} else if (info.mode == SUS_SU_WITH_OVERLAY) {
+		SUSFS_LOGE("sus_su mode %d is deprecated\n", SUS_SU_WITH_OVERLAY);
+		return 1;
+	}
+	return 1;
+}
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_SU
+
 static int copy_config_to_buf(const char *config_string, char *buf_ptr, size_t *copied_size, size_t bufsize) {
 	size_t tmp_size = strlen(config_string);
 
@@ -1228,8 +1282,8 @@ int susfs_get_enabled_features(char __user* buf, size_t bufsize) {
 	if (err) goto out_kfree_kbuf;
 	buf_ptr = kbuf + copied_size;
 #endif
-#ifdef CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT
-	err = copy_config_to_buf("CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT\n", buf_ptr, &copied_size, bufsize);
+#ifdef CONFIG_KSU_SUSFS_SUS_SU
+	err = copy_config_to_buf("CONFIG_KSU_SUSFS_SUS_SU\n", buf_ptr, &copied_size, bufsize);
 	if (err) goto out_kfree_kbuf;
 	buf_ptr = kbuf + copied_size;
 #endif
