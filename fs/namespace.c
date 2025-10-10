@@ -1263,9 +1263,9 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 	int err;
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	char *src_path = NULL, *path_ptr = NULL;
-	// We won't check it anymore if boot-completed stage is triggered.
+	// We do not check anymore for ksu process if boot-completed stage is triggered
 	if (susfs_is_boot_completed_triggered) {
-		goto orig_flow;
+		goto skip_checking_for_ksu_proc;
 	}
 	// First we must check for ksu process because of magic mount
 	if (susfs_is_current_ksu_domain()) {
@@ -1278,13 +1278,12 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 		mnt = susfs_alloc_sus_vfsmnt(old->mnt_devname);
 		goto bypass_orig_flow;
 	}
-
+skip_checking_for_ksu_proc:
 	// Lastly for other processes of which old->mnt_id is >= DEFAULT_KSU_MNT_ID, go assign fake mnt_id
 	if (old->mnt_id >= DEFAULT_KSU_MNT_ID) {
 		mnt = susfs_alloc_sus_vfsmnt(old->mnt_devname);
 		goto bypass_orig_flow;
 	}
-orig_flow:
 #endif
 	mnt = alloc_vfsmnt(old->mnt_devname);
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT

@@ -877,11 +877,9 @@ void susfs_try_umount(uid_t target_uid) {
 
 #ifdef CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
 void susfs_auto_add_try_umount_for_bind_mount(struct path *path) {
-	struct st_susfs_try_umount_list *cursor = NULL, *temp = NULL;
 	struct st_susfs_try_umount_list *new_list = NULL;
 	char *pathname = NULL, *dpath = NULL;
 	size_t new_pathname_len = 0;
-	bool is_magic_mount = false;
 
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 	if (path->dentry->d_inode->i_mapping->flags & BIT_SUS_KSTAT) {
@@ -911,27 +909,12 @@ void susfs_auto_add_try_umount_for_bind_mount(struct path *path) {
 			new_pathname_len = strlen(dpath) - 22;
 			memmove(dpath, dpath+22, new_pathname_len);
 			*(dpath + new_pathname_len) = '\0';
-			is_magic_mount = true;
-			goto check_duplicated_list_head;
+			goto add_to_new_list;
 		}
 		goto out_free_pathname;
 	}
 
-check_duplicated_list_head:
-	list_for_each_entry_safe(cursor, temp, &LH_TRY_UMOUNT_PATH, list) {
-		if (is_magic_mount) {
-			if (!strncmp(dpath, cursor->info.target_pathname, strlen(cursor->info.target_pathname))) {
-				SUSFS_LOGE("target_pathname: '%s', ino: %lu, is already created in LH_TRY_UMOUNT_PATH\n",
-								dpath, path->dentry->d_inode->i_ino);
-				goto out_free_pathname;
-			}
-		} else if (unlikely(!strcmp(dpath, cursor->info.target_pathname))) {
-			SUSFS_LOGE("target_pathname: '%s', ino: %lu, is already created in LH_TRY_UMOUNT_PATH\n",
-							dpath, path->dentry->d_inode->i_ino);
-			goto out_free_pathname;
-		}
-	}
-
+add_to_new_list:
 	new_list = kmalloc(sizeof(struct st_susfs_try_umount_list), GFP_KERNEL);
 	if (!new_list) {
 		SUSFS_LOGE("no enough memory\n");
