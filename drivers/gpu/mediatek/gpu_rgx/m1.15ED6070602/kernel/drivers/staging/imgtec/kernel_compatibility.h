@@ -451,7 +451,7 @@ __pvr_access_ok_compat(int type, const void __user * addr, unsigned long size)
  * renamed to "mmap_lock" in v5.8. Moreover, new APIs are provided to
  * access this lock starting from v5.8.
  */
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0))
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 325))
 
 #define mmap_write_lock(mm)   down_write(&mm->mmap_sem)
 #define mmap_write_unlock(mm) up_write(&mm->mmap_sem)
@@ -459,7 +459,7 @@ __pvr_access_ok_compat(int type, const void __user * addr, unsigned long size)
 #define mmap_read_lock(mm)    down_read(&mm->mmap_sem)
 #define mmap_read_unlock(mm)  up_read(&mm->mmap_sem)
 
-#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0) */
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 325) */
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0))
 #define drm_gem_object_put(obj) drm_gem_object_unreference_unlocked(obj)
