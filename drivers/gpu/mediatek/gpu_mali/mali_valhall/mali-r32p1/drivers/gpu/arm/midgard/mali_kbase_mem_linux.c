@@ -915,7 +915,7 @@ int kbase_mem_flags_change(struct kbase_context *kctx, u64 gpu_addr, unsigned in
 		real_flags |= KBASE_REG_SHARE_IN;
 
 	/* now we can lock down the context, and find the region */
-	down_write(kbase_mem_get_process_mmap_lock());
+	mmap_write_lock(current->mm);
 	kbase_gpu_vm_lock(kctx);
 
 	/* Validate the region */
@@ -1030,7 +1030,7 @@ int kbase_mem_flags_change(struct kbase_context *kctx, u64 gpu_addr, unsigned in
 
 out_unlock:
 	kbase_gpu_vm_unlock(kctx);
-	up_write(kbase_mem_get_process_mmap_lock());
+	mmap_write_unlock(current->mm);
 out:
 	return ret;
 }
@@ -1735,7 +1735,7 @@ static struct kbase_va_region *kbase_mem_from_user_buffer(
 		*flags |= KBASE_MEM_IMPORT_HAVE_PAGES;
 	}
 
-	down_read(kbase_mem_get_process_mmap_lock());
+	mmap_read_lock(current->mm);
 
 	write = reg->flags & (KBASE_REG_CPU_WR | KBASE_REG_GPU_WR);
 
@@ -1755,7 +1755,7 @@ KERNEL_VERSION(4, 5, 0) > LINUX_VERSION_CODE
 			write ? FOLL_WRITE : 0, pages, NULL);
 #endif
 
-	up_read(kbase_mem_get_process_mmap_lock());
+	mmap_read_unlock(current->mm);
 
 	if (faulted_pages != *va_pages)
 		goto fault_mismatch;
@@ -2284,7 +2284,7 @@ int kbase_mem_commit(struct kbase_context *kctx, u64 gpu_addr, u64 new_pages)
 		return -EINVAL;
 	}
 
-	down_write(kbase_mem_get_process_mmap_lock());
+	mmap_write_lock(current->mm);
 	kbase_gpu_vm_lock(kctx);
 
 	/* Validate the region */
@@ -2350,7 +2350,7 @@ int kbase_mem_commit(struct kbase_context *kctx, u64 gpu_addr, u64 new_pages)
 		 * No update to the mm so downgrade the writer lock to a read
 		 * lock so other readers aren't blocked after this point.
 		 */
-		downgrade_write(kbase_mem_get_process_mmap_lock());
+		mmap_write_downgrade(current->mm);
 		read_locked = true;
 
 		/* Allocate some more pages */
@@ -2392,9 +2392,9 @@ int kbase_mem_commit(struct kbase_context *kctx, u64 gpu_addr, u64 new_pages)
 out_unlock:
 	kbase_gpu_vm_unlock(kctx);
 	if (read_locked)
-		up_read(kbase_mem_get_process_mmap_lock());
+		mmap_read_unlock(current->mm);
 	else
-		up_write(kbase_mem_get_process_mmap_lock());
+		mmap_write_unlock(current->mm);
 
 	return res;
 }
@@ -2786,13 +2786,13 @@ out:
 void kbase_os_mem_map_lock(struct kbase_context *kctx)
 {
 	(void)kctx;
-	down_read(kbase_mem_get_process_mmap_lock());
+	mmap_read_lock(current->mm);
 }
 
 void kbase_os_mem_map_unlock(struct kbase_context *kctx)
 {
 	(void)kctx;
-	up_read(kbase_mem_get_process_mmap_lock());
+	mmap_read_unlock(current->mm);
 }
 
 static int kbasep_reg_mmap(struct kbase_context *kctx,
