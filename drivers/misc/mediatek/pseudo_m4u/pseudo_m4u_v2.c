@@ -976,14 +976,14 @@ static int m4u_get_pages(int eModuleID, unsigned long BufAddr,
 			return -EFAULT;
 		}
 
-		down_read(&current->mm->mmap_sem);
+		mmap_read_lock(current->mm);
 
 		vma = find_vma(current->mm, BufAddr);
 		if (vma == NULL) {
 			M4U_MSG("cannot find vma:module=%s,va=0x%lx-0x%lx\n",
 				   m4u_get_module_name(eModuleID),
 				   BufAddr, BufSize);
-			up_read(&current->mm->mmap_sem);
+			mmap_read_unlock(current->mm);
 			return -1;
 		}
 		write_mode = (vma->vm_flags & VM_WRITE) ? 1 : 0;
@@ -999,10 +999,10 @@ static int m4u_get_pages(int eModuleID, unsigned long BufAddr,
 				M4U_MSG("but vma is: start=0x%lx,end=0x%lx\n",
 					   (unsigned long)vma->vm_start,
 					   (unsigned long)vma->vm_end);
-				up_read(&current->mm->mmap_sem);
+				mmap_read_unlock(current->mm);
 				return -1;
 			}
-			up_read(&current->mm->mmap_sem);
+			mmap_read_unlock(current->mm);
 
 			for (i = 0; i < page_num; i++) {
 				unsigned long va_align = BufAddr &
@@ -1034,7 +1034,7 @@ static int m4u_get_pages(int eModuleID, unsigned long BufAddr,
 						m4u_get_module_name(eModuleID),
 						BufAddr, BufSize,
 						(unsigned int)vma->vm_flags);
-					up_read(&current->mm->mmap_sem);
+					mmap_read_unlock(current->mm);
 					return -1;
 				}
 			}
@@ -1050,7 +1050,7 @@ static int m4u_get_pages(int eModuleID, unsigned long BufAddr,
 						 0, (struct page **)pPhys,
 						 vma);
 
-			up_read(&current->mm->mmap_sem);
+			mmap_read_unlock(current->mm);
 
 			if (ret < page_num) {
 				/* release pages first */
@@ -1175,13 +1175,13 @@ struct sg_table *pseudo_get_sg(int portid, unsigned long va, int size)
 		goto err_free;
 	}
 
-	down_read(&current->mm->mmap_sem);
+	mmap_read_lock(current->mm);
 	vma = find_vma(current->mm, va);
 	if (vma && vma->vm_flags & VM_PFNMAP)
 		have_page = 0;
 	else
 		have_page = 1;
-	up_read(&current->mm->mmap_sem);
+	mmap_read_unlock(current->mm);
 	for (i = 0; i < page_num; i++) {
 		va += i * M4U_PAGE_SIZE;
 
@@ -2229,7 +2229,7 @@ static int m4u_create_sgtable_user(unsigned long va_align,
 	unsigned int left_page_num = table->nents;
 	unsigned long va = va_align;
 
-	down_read(&current->mm->mmap_sem);
+	mmap_read_lock(current->mm);
 
 	while (left_page_num) {
 		unsigned int vma_page_num;
@@ -2295,7 +2295,7 @@ static int m4u_create_sgtable_user(unsigned long va_align,
 	}
 
 out:
-	up_read(&current->mm->mmap_sem);
+	mmap_read_unlock(current->mm);
 	return ret;
 }
 

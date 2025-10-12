@@ -887,7 +887,7 @@ static int DumpThreadNativeMaps_log(pid_t pid, struct task_struct *current_task)
 		return -1;
 	}
 
-	down_read(&current_task->mm->mmap_sem);
+	mmap_read_lock(current_task->mm);
 	vma = current_task->mm->mmap;
 	pr_info("Dump native maps files:\n");
 	while (vma && (mapcount < current_task->mm->map_count)) {
@@ -939,7 +939,7 @@ static int DumpThreadNativeMaps_log(pid_t pid, struct task_struct *current_task)
 		vma = vma->vm_next;
 		mapcount++;
 	}
-	up_read(&current_task->mm->mmap_sem);
+	mmap_read_unlock(current_task->mm);
 	mmput(current_task->mm);
 
 	return 0;
@@ -993,7 +993,7 @@ static int DumpThreadNativeInfo_By_tid_log(pid_t tid,
 
 	userstack_start = (unsigned long)user_ret->ARM_sp;
 
-	down_read(&current_task->mm->mmap_sem);
+	mmap_read_lock(current_task->mm);
 	vma = current_task->mm->mmap;
 	while (vma) {
 		if (vma->vm_start <= userstack_start &&
@@ -1005,7 +1005,7 @@ static int DumpThreadNativeInfo_By_tid_log(pid_t tid,
 		if (vma == current_task->mm->mmap)
 			break;
 	}
-	up_read(&current_task->mm->mmap_sem);
+	mmap_read_unlock(current_task->mm);
 
 	if (userstack_end == 0) {
 		pr_info(" %s,%d:%s,userstack_end == 0",
@@ -1091,7 +1091,7 @@ static int DumpThreadNativeInfo_By_tid_log(pid_t tid,
 		    (long)(user_ret->user_regs.regs[1]),
 		    (long)(user_ret->user_regs.regs[0]));
 		userstack_start = (unsigned long)user_ret->user_regs.regs[13];
-		down_read(&current_task->mm->mmap_sem);
+		mmap_read_lock(current_task->mm);
 		vma = current_task->mm->mmap;
 		while (vma) {
 			if (vma->vm_start <= userstack_start &&
@@ -1103,7 +1103,7 @@ static int DumpThreadNativeInfo_By_tid_log(pid_t tid,
 			if (vma == current_task->mm->mmap)
 				break;
 		}
-		up_read(&current_task->mm->mmap_sem);
+		mmap_read_unlock(current_task->mm);
 
 		if (userstack_end == 0) {
 			pr_info("Dump native stack failed:\n");
@@ -1171,7 +1171,7 @@ static int DumpThreadNativeInfo_By_tid_log(pid_t tid,
 
 		userstack_start = (unsigned long)user_ret->user_regs.sp;
 
-		down_read(&current_task->mm->mmap_sem);
+		mmap_read_lock(current_task->mm);
 		vma = current_task->mm->mmap;
 		while (vma != NULL) {
 			if (vma->vm_start <= userstack_start &&
@@ -1183,7 +1183,7 @@ static int DumpThreadNativeInfo_By_tid_log(pid_t tid,
 			if (vma == current_task->mm->mmap)
 				break;
 		}
-		up_read(&current_task->mm->mmap_sem);
+		mmap_read_unlock(current_task->mm);
 		if (!userstack_end) {
 			pr_info("Dump native stack failed:\n");
 			return ret;
@@ -1318,7 +1318,7 @@ static int DumpThreadNativeMaps(pid_t pid, struct task_struct *current_task)
 		return -1;
 	}
 
-	down_read(&current_task->mm->mmap_sem);
+	mmap_read_lock(current_task->mm);
 	vma = current_task->mm->mmap;
 	Log2HangInfo("Dump native maps files:\n");
 	hang_log("Dump native maps files:\n");
@@ -1389,7 +1389,7 @@ static int DumpThreadNativeMaps(pid_t pid, struct task_struct *current_task)
 		vma = vma->vm_next;
 		mapcount++;
 	}
-	up_read(&current_task->mm->mmap_sem);
+	mmap_read_unlock(current_task->mm);
 
 	return 0;
 }
@@ -1434,7 +1434,7 @@ static int DumpThreadNativeInfo_By_tid(pid_t tid,
 
 	userstack_start = (unsigned long)user_ret->ARM_sp;
 
-	down_read(&current_task->mm->mmap_sem);
+	mmap_read_lock(current_task->mm);
 	vma = current_task->mm->mmap;
 	while (vma != NULL) {
 		if (vma->vm_start <= userstack_start &&
@@ -1446,7 +1446,7 @@ static int DumpThreadNativeInfo_By_tid(pid_t tid,
 		if (vma == current_task->mm->mmap)
 			break;
 	}
-	up_read(&current_task->mm->mmap_sem);
+	mmap_read_unlock(current_task->mm);
 
 	if (userstack_end == 0) {
 		pr_info(" %s,%d:%s,userstack_end == 0", __func__,
@@ -1513,7 +1513,7 @@ static int DumpThreadNativeInfo_By_tid(pid_t tid,
 			(long)(user_ret->user_regs.regs[1]),
 			(long)(user_ret->user_regs.regs[0]));
 		userstack_start = (unsigned long)user_ret->user_regs.regs[13];
-		down_read(&current_task->mm->mmap_sem);
+		mmap_read_lock(current_task->mm);
 		vma = current_task->mm->mmap;
 		while (vma != NULL) {
 			if (vma->vm_start <= userstack_start &&
@@ -1525,7 +1525,7 @@ static int DumpThreadNativeInfo_By_tid(pid_t tid,
 			if (vma == current_task->mm->mmap)
 				break;
 		}
-		up_read(&current_task->mm->mmap_sem);
+		mmap_read_unlock(current_task->mm);
 
 		if (userstack_end == 0) {
 			pr_info("Dump native stack failed:\n");
@@ -1570,7 +1570,7 @@ static int DumpThreadNativeInfo_By_tid(pid_t tid,
 	} else {		/*K64+U64 */
 		userstack_start = (unsigned long)user_ret->user_regs.sp;
 
-		down_read(&current_task->mm->mmap_sem);
+		mmap_read_lock(current_task->mm);
 		vma = current_task->mm->mmap;
 		while (vma != NULL) {
 			if (vma->vm_start <= userstack_start &&
@@ -1582,7 +1582,7 @@ static int DumpThreadNativeInfo_By_tid(pid_t tid,
 			if (vma == current_task->mm->mmap)
 				break;
 		}
-		up_read(&current_task->mm->mmap_sem);
+		mmap_read_unlock(current_task->mm);
 		if (userstack_end == 0) {
 			pr_info("Dump native stack failed:\n");
 			return ret;
