@@ -457,18 +457,4 @@ static inline vm_fault_t vmf_insert_pfn_prot(struct vm_area_struct *vma,
 }
 #endif
 
-/**
- * kbase_mem_get_process_mmap_lock - Return the mmap lock for the current process
- *
- * Return: the mmap lock for the current process
- */
-static inline struct rw_semaphore *kbase_mem_get_process_mmap_lock(void)
-{
-#if KERNEL_VERSION(5, 8, 0) > LINUX_VERSION_CODE
-	return &current->mm->mmap_sem;
-#else /* KERNEL_VERSION(5, 8, 0) > LINUX_VERSION_CODE */
-	return &current->mm->mmap_lock;
-#endif /* KERNEL_VERSION(5, 8, 0) > LINUX_VERSION_CODE */
-}
-
 #endif				/* _KBASE_MEM_LINUX_H_ */

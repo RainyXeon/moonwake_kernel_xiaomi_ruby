@@ -1289,10 +1289,10 @@ int __m4u_dealloc_mva(int eModuleID,
 
 			M4UTRACE();
 			if (current->mm) {
-				down_read(&current->mm->mmap_sem);
+				mmap_read_lock(current->mm);
 				vma = find_vma(current->mm, BufAddr);
 			} else if (current->active_mm) {
-				down_read(&current->active_mm->mmap_sem);
+				mmap_read_lock(current->active_mm);
 				vma = NULL;
 			}
 			M4UTRACE();
@@ -1302,22 +1302,22 @@ int __m4u_dealloc_mva(int eModuleID,
 					m4u_get_port_name(eModuleID), BufAddr,
 					BufSize);
 				if (current->mm)
-					up_read(&current->mm->mmap_sem);
+					mmap_read_unlock(current->mm);
 				else if (current->active_mm)
-					up_read(&current->active_mm->mmap_sem);
+					mmap_read_unlock(current->active_mm);
 				goto out;
 			}
 			if ((vma->vm_flags) & VM_PFNMAP) {
 				if (current->mm)
-					up_read(&current->mm->mmap_sem);
+					mmap_read_unlock(current->mm);
 				else if (current->active_mm)
-					up_read(&current->active_mm->mmap_sem);
+					mmap_read_unlock(current->active_mm);
 				goto out;
 			}
 			if (current->mm)
-				up_read(&current->mm->mmap_sem);
+				mmap_read_unlock(current->mm);
 			else if (current->active_mm)
-				up_read(&current->active_mm->mmap_sem);
+				mmap_read_unlock(current->active_mm);
 			if (!((BufAddr >= VMALLOC_START) &&
 			    (BufAddr <= VMALLOC_END)))
 				if (!sg_table) {

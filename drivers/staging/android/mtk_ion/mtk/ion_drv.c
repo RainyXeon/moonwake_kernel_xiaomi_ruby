@@ -258,13 +258,13 @@ static int __cache_sync_by_range(struct ion_client *client,
 	ret  = __ion_is_user_va(start, size);
 	if (ret) {
 		lock_vma = true;
-		down_read(&current->mm->mmap_sem);
+		mmap_read_lock(current->mm);
 		ret = ion_check_user_va(start, size);
 	}
 
 	if (!ret) {
 		if (lock_vma) {
-			up_read(&current->mm->mmap_sem);
+			mmap_read_unlock(current->mm);
 			lock_vma = false;
 		}
 		scnprintf(ion_name, 199,
@@ -304,7 +304,7 @@ start_sync:
 		break;
 	default:
 		if (lock_vma) {
-			up_read(&current->mm->mmap_sem);
+			mmap_read_unlock(current->mm);
 			lock_vma = false;
 		}
 		IONMSG("%s err type. (%d):clt(%s)cache(%d)\n",
@@ -315,7 +315,7 @@ start_sync:
 	}
 
 	if (lock_vma) {
-		up_read(&current->mm->mmap_sem);
+		mmap_read_unlock(current->mm);
 		lock_vma = false;
 	}
 	__ion_cache_mmp_end(sync_type, size);
