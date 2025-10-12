@@ -909,7 +909,7 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
 		 * Release mmap_sem temporarily if someone wants to
 		 * access it for write request.
 		 */
-		if (rwsem_is_contended(&mm->mmap_sem)) {
+		if (mmap_lock_is_contended(mm)) {
 			mmap_read_unlock(mm);
 			ret = mmap_read_lock_killable(mm);
 			if (ret) {
