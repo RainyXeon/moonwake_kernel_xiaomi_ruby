@@ -1132,11 +1132,7 @@ struct vfsmount *vfs_create_mount(struct fs_context *fc)
 	sb = fc->root->d_sb;
 
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-	// We won't check it anymore if boot-completed stage is triggered.
-	if (susfs_is_boot_completed_triggered) {
-		goto orig_flow;
-	}
-	// We only check for ksu process
+	// We keep checking for ksu process
 	if (susfs_is_current_ksu_domain()) {
 		mnt = susfs_alloc_sus_vfsmnt(fc->source ?: "none");
 		goto bypass_orig_flow;
@@ -2556,7 +2552,7 @@ static int do_loopback(struct path *path, const char *old_name,
 #if defined(CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT) || defined(CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT)
 	// Check if bind mounted path should be hidden and umounted automatically.
 	// And we target only process with ksu domain.
-	if (!susfs_is_boot_completed_triggered && (susfs_is_current_ksu_domain() || !strcmp(mnt->mnt_devname, "KSU"))) {
+	if (susfs_is_current_ksu_domain()) {
 #if defined(CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT)
 		if (susfs_is_auto_add_sus_bind_mount_enabled &&
 				susfs_auto_add_sus_bind_mount(old_name, &old_path)) {
@@ -2569,9 +2565,6 @@ static int do_loopback(struct path *path, const char *old_name,
 		}
 #endif
 	}
-#if defined(CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT)
-orig_flow:
-#endif
 #endif // #if defined(CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT) || defined(CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT)
 out2:
 	unlock_mount(mp);
@@ -3949,6 +3942,10 @@ void susfs_reorder_mnt_id(void) {
 	get_mnt_ns(mnt_ns);
 	first_mnt_id = list_first_entry(&mnt_ns->list, struct mount, mnt_list)->mnt_id;
 	list_for_each_entry(mnt, &mnt_ns->list, mnt_list) {
+		// It is very important that we don't reorder the sus mount if it is not umounted
+		if (mnt->mnt_id == DEFAULT_KSU_MNT_ID) {
+			continue;
+		}
 		mnt->mnt.susfs_mnt_id_backup = mnt->mnt_id;
 		mnt->mnt_id = first_mnt_id++;
 	}

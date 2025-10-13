@@ -542,25 +542,24 @@ int susfs_add_sus_mount(struct st_susfs_sus_mount* __user user_info) {
 }
 
 #ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
-int susfs_auto_add_sus_bind_mount(const char *pathname, struct path *path_target) {
+void susfs_auto_add_sus_bind_mount(const char *pathname, struct path *path_target) {
 	struct mount *mnt;
 	struct inode *inode;
 
 	mnt = real_mount(path_target->mnt);
 	if (mnt->mnt_group_id > 0 && // 0 means no peer group
 		mnt->mnt_group_id < DEFAULT_KSU_MNT_GROUP_ID) {
-		// return 0 here as we still want it to be added to try_umount list
-		return 0;
+		// Just return here
+		return;
 	}
 	inode = path_target->dentry->d_inode;
-	if (!inode) return 1;
+	if (!inode) return;
 	if (!(inode->i_mapping->flags & BIT_SUS_MOUNT)) {
 		spin_lock(&inode->i_lock);
 		set_bit(AS_FLAGS_SUS_MOUNT, &inode->i_mapping->flags);
 		spin_unlock(&inode->i_lock);
 		SUSFS_LOGI("set SUS_MOUNT inode state for source bind mount path '%s'\n", pathname);
 	}
-	return 0;
 }
 #endif // #ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
 
@@ -1296,3 +1295,4 @@ void susfs_init(void) {
 
 /* No module exit is needed becuase it should never be a loadable kernel module */
 //void __init susfs_exit(void)
+

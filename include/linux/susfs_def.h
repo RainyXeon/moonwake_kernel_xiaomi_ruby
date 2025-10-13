@@ -36,8 +36,8 @@
 #define SUS_SU_WITH_OVERLAY 1 /* deprecated */
 #define SUS_SU_WITH_HOOKS 2
 
-#define DEFAULT_KSU_MNT_ID 300000 /* used by mount->mnt_id */
-#define DEFAULT_KSU_MNT_GROUP_ID 3000 /* used by mount->mnt_group_id */
+#define DEFAULT_KSU_MNT_ID 500000 /* used by mount->mnt_id */
+#define DEFAULT_KSU_MNT_GROUP_ID 000 /* used by mount->mnt_group_id */
 
 /*
  * mount->mnt.susfs_mnt_id_backup => storing original mnt_id of normal mounts or custom sus mnt_id of sus mounts
