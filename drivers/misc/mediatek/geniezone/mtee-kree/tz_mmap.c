@@ -51,7 +51,7 @@ long _map_user_pages(struct MTIOMMU_PIN_RANGE_T *pinRange, unsigned long uaddr,
 	write = (control == 0) ? 1 : 0;
 
 	/* Try to fault in all of the necessary pages */
-	down_read(&current->mm->mmap_sem);
+	mmap_read_lock(current->mm);
 	vma = find_vma_intersection(current->mm, uaddr, uaddr + size);
 	if (!vma) {
 		res = -EFAULT;
@@ -90,7 +90,7 @@ long _map_user_pages(struct MTIOMMU_PIN_RANGE_T *pinRange, unsigned long uaddr,
 		} while (vma && vma->vm_flags & (VM_IO | VM_PFNMAP));
 	}
 out:
-	up_read(&current->mm->mmap_sem);
+	mmap_read_unlock(current->mm);
 	if (res < 0) {
 		pr_debug("map user pages error = %d\n", res);
 		goto out_free;

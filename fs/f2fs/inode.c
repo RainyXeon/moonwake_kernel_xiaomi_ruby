@@ -224,8 +224,7 @@ static bool sanity_check_inode(struct inode *inode, struct page *node_page)
 
 	if (ino_of_node(node_page) == fi->i_xattr_nid) {
 		set_sbi_flag(sbi, SBI_NEED_FSCK);
-		f2fs_warn(sbi,
-			"%s: corrupted inode i_ino=%lx, xnid=%x, run fsck to fix.",
+		f2fs_warn(sbi, "%s: corrupted inode i_ino=%lx, xnid=%x, run fsck to fix.",
 			__func__, inode->i_ino, fi->i_xattr_nid);
 		return false;
 	}
@@ -768,6 +767,8 @@ retry:
 
 	if (err) {
 		f2fs_update_inode_page(inode);
+		if (dquot_initialize_needed(inode))
+			set_sbi_flag(sbi, SBI_QUOTA_NEED_REPAIR);
 
 		/*
 		 * If both f2fs_truncate() and f2fs_update_inode_page() failed
@@ -775,8 +776,7 @@ retry:
 		 * avoid triggering later f2fs_bug_on().
 		 */
 		if (is_inode_flag_set(inode, FI_DIRTY_INODE)) {
-			f2fs_warn(sbi,
-				"f2fs_evict_inode: inode is dirty, ino:%lu",
+			f2fs_warn(sbi, "f2fs_evict_inode: inode is dirty, ino:%lu",
 				inode->i_ino);
 			f2fs_inode_synced(inode);
 			set_sbi_flag(sbi, SBI_NEED_FSCK);
