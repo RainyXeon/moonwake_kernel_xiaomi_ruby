@@ -127,6 +127,13 @@ struct st_susfs_open_redirect_hlist {
 };
 #endif
 
+/* sus_map */
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+struct st_susfs_sus_map {
+	char                             target_pathname[SUSFS_MAX_LEN_PATHNAME];
+};
+#endif
+
 /***********************/
 /* FORWARD DECLARATION */
 /***********************/
@@ -171,7 +178,10 @@ int susfs_spoof_cmdline_or_bootconfig(struct seq_file *m);
 int susfs_add_open_redirect(struct st_susfs_open_redirect* __user user_info);
 struct filename* susfs_get_redirected_path(unsigned long ino);
 #endif
-
+/* sus_map */
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+int susfs_add_sus_map(struct st_susfs_sus_map* __user user_info);
+#endif
 int susfs_get_enabled_features(char __user* buf, size_t bufsize);
 void susfs_set_avc_log_spoofing(bool enabled);
 
