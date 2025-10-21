@@ -28,6 +28,12 @@ struct sugov_tunables {
 	unsigned int		down_rate_limit_us;
 };
 
+static unsigned int sugov_min_delta_khz = 50;
+module_param(sugov_min_delta_khz, uint, 0644);
+MODULE_PARM_DESC(sugov_min_delta_khz,
+	"Minimum frequency delta (kHz) before applying a new frequency. "
+	"Set ~one OPP step, e.g. 50000 for 50 MHz, to reduce jitter.");
+
 struct sugov_policy {
 	struct cpufreq_policy	*policy;
 
@@ -157,11 +163,42 @@ static bool sugov_update_next_freq(struct sugov_policy *sg_policy, u64 time,
 		return false;
 	}
 
+
+	static const u64 down_delay_ns = 20 * NSEC_PER_MSEC; /* 20ms grace */
+	if (next_freq < sg_policy->next_freq &&
+	    time - sg_policy->last_freq_update_time < down_delay_ns)
+		return false;
+
+	if (!console_trylock()) {
+		sg_policy->down_rate_delay_ns *= 2; 
+	} else {
+		console_unlock();
+	}
+
+	if (sugov_min_delta_khz && sg_policy->next_freq) {
+		unsigned int delta = (next_freq > sg_policy->next_freq)
+				? (next_freq - sg_policy->next_freq)
+				: (sg_policy->next_freq - next_freq);
+		if (delta < sugov_min_delta_khz)
+			return false;
+	}
+
+	if (next_freq < sg_policy->policy->max * 8 / 10)
+		next_freq = (next_freq * 95) / 100;
+
 	sg_policy->next_freq = next_freq;
+
+	if (next_freq > sg_policy->next_freq)
+		next_freq = (next_freq * 105) / 100;  /* +5% on upscaling */
+	else
+		next_freq = (next_freq * 97) / 100;  /* -3% on downscaling */
+
 	sg_policy->last_freq_update_time = time;
 
 	return true;
 }
+
+
 
 #ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
 #else
@@ -249,12 +286,19 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 	sg_policy->prev_cached_raw_freq = sg_policy->cached_raw_freq;
 	sg_policy->cached_raw_freq = freq;
 
+	if (util * 100 < max * 20)
+		freq = max(policy->min, freq * 8 / 10);
+
+	if (util * 100 > max * 60)
+		freq = min(policy->max, (freq * 105) / 100);
+
 #ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
 	return freq;
 #else
 	return cpufreq_driver_resolve_freq(policy, freq);
 #endif
 }
+
 #endif
 
 extern long
@@ -492,7 +536,7 @@ static unsigned long sugov_iowait_apply(struct sugov_cpu *sg_cpu, u64 time,
 		/*
 		 * No boost pending; reduce the boost value.
 		 */
-		sg_cpu->iowait_boost >>= 1;
+		sg_cpu->iowait_boost >>= 2;
 		if (sg_cpu->iowait_boost < sg_cpu->min) {
 			sg_cpu->iowait_boost = 0;
 			return util;
@@ -573,6 +617,14 @@ static void sugov_update_single(struct update_util_data *hook, u64 time,
 	trace_schedutil_uclamp_util(policy->cpu, util);
 #endif
 	next_f = get_next_freq(sg_policy, util, max);
+
+	if ((flags & SCHED_CPUFREQ_IOWAIT) || util > max * 7 / 10) {
+		next_f = sg_policy->policy->max;
+
+	} else if (util < max * 3 / 10 && next_f > sg_policy->policy->min * 2) {
+		next_f = (next_f * 90) / 100;
+	}
+
 	/*
 	 * Do not reduce the frequency if the CPU has not been idle
 	 * recently, as the reduction is likely to be premature then.
@@ -584,6 +636,7 @@ static void sugov_update_single(struct update_util_data *hook, u64 time,
 		sg_policy->cached_raw_freq = sg_policy->prev_cached_raw_freq;
 	}
 
+
 #ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
 	if (sugov_update_next_freq(sg_policy, time, next_f)) {
 		mt_cpufreq_set_by_wfi_load_cluster(cid, next_f);
@@ -591,7 +644,6 @@ static void sugov_update_single(struct update_util_data *hook, u64 time,
 		trace_sched_util(cid, next_f, time);
 	}
 #else
-
 	/*
 	 * This code runs under rq->lock for the target CPU, so it won't run
 	 * concurrently on two different CPUs for the same target and it is not
@@ -606,8 +658,8 @@ static void sugov_update_single(struct update_util_data *hook, u64 time,
 
 	__cpufreq_notifier_fp(cid, next_f);
 	raw_spin_unlock(&sg_policy->update_lock);
-
 }
+
 
 static unsigned int sugov_next_freq_shared(struct sugov_cpu *sg_cpu, u64 time)
 {
@@ -1013,6 +1065,13 @@ static int sugov_init(struct cpufreq_policy *policy)
 
 	policy->dvfs_possible_from_any_cpu = true;
 
+	if (policy->cpuinfo.transition_latency == 0 ||
+	    policy->cpuinfo.transition_latency > 2000000ULL)
+		policy->cpuinfo.transition_latency = 2000000ULL;
+
+	pr_info("schedutil: transition latency clamped to %llu ns\n",
+		policy->cpuinfo.transition_latency);
+
 	cpufreq_enable_fast_switch(policy);
 
 	sg_policy = sugov_policy_alloc(policy);
@@ -1056,7 +1115,6 @@ static int sugov_init(struct cpufreq_policy *policy)
 				   schedutil_gov.name);
 	if (ret)
 		goto fail;
-
 
 out:
 	mutex_unlock(&global_tunables_lock);
