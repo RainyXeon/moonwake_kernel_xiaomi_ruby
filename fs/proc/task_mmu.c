@@ -896,6 +896,7 @@ static int show_smap(struct seq_file *m, void *v)
 				seq_printf(m, "ProtectionKey:  %8u\n", vma_pkey(vma));
 		seq_puts(m, "VmFlags: mr mw me");
 		seq_putc(m, '\n');
+		goto bypass_orig_flow;
 	}
 #endif
 
@@ -920,7 +921,9 @@ static int show_smap(struct seq_file *m, void *v)
 	if (arch_pkeys_enabled())
 		seq_printf(m, "ProtectionKey:  %8u\n", vma_pkey(vma));
 	show_smap_vma_flags(m, vma);
-
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+bypass_orig_flow:
+#endif
 	m_cache_vma(m, vma);
 
 	return 0;
