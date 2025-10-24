@@ -383,6 +383,8 @@ repeat:
 		  jbd2_log_space_left(journal));
 	read_unlock(&journal->j_state_lock);
 	current->journal_info = handle;
+
+	rwsem_acquire_read(&journal->j_trans_commit_map, 0, 1, _THIS_IP_);
 	jbd2_journal_free_transaction(new_transaction);
 	/*
 	 * Ensure that no allocations done while the transaction is open are
