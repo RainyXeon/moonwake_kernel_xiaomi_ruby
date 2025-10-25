@@ -887,8 +887,8 @@ static int show_smap(struct seq_file *m, void *v)
 	{
 		show_map_vma(m, vma);
 		SEQ_PUT_DEC("Size:           ", vma->vm_end - vma->vm_start);
-		SEQ_PUT_DEC(" kB\nKernelPageSize: ", 4);
-		SEQ_PUT_DEC(" kB\nMMUPageSize:    ", 4);
+		SEQ_PUT_DEC(" kB\nKernelPageSize: ", vma_kernel_pagesize(vma));
+		SEQ_PUT_DEC(" kB\nMMUPageSize:    ", vma_mmu_pagesize(vma));
 		seq_puts(m, " kB\n");
 		__show_smap(m, &mss);
 		seq_printf(m, "THPeligible:    %d\n", 0);
