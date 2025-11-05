@@ -51,6 +51,8 @@
 #define USB_TP_TRANSMISSION_DELAY_MAX	65535	/* ns */
 #define USB_PING_RESPONSE_TIME		400	/* ns */
 
+extern int deny_new_usb;
+
 /*
  * Give SS hubs 200ms time after wake to train downstream links before
  * assuming no port activity and allowing hub to runtime suspend back.
@@ -5109,6 +5111,10 @@ static void hub_port_connect(struct usb_hub *hub, int port1, u16 portstatus,
 		if (portstatus & USB_PORT_STAT_ENABLE)
 			goto done;
 		return;
+	}
+	if (deny_new_usb) {
+		dev_err(&port_dev->dev, "denied insert of USB device on port %d\n", port1);
+		goto done;
 	}
 	if (hub_is_superspeed(hub->hdev))
 		unit_load = 150;
