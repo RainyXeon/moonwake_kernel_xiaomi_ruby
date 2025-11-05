@@ -1378,6 +1378,7 @@ int gether_set_ifname(struct net_device *net, const char *name, int len)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(gether_set_ifname);
+
 void gether_update_dl_max_xfer_size(struct gether *link, uint32_t s)
 {
 	struct eth_dev		*dev = link->ioport;
