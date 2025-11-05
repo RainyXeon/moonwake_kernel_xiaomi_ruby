@@ -1344,9 +1344,9 @@ int gether_get_ifname(struct net_device *net, char *name, int len)
 {
 	int ret;
 	rtnl_lock();
-	ret = snprintf(name, len, "%s\n", netdev_name(net));
+	ret = scnprintf(name, len, "%s\n", netdev_name(net));
 	rtnl_unlock();
-	return ret < len ? ret : len;
+	return ret;
 }
 EXPORT_SYMBOL_GPL(gether_get_ifname);
 void gether_update_dl_max_xfer_size(struct gether *link, uint32_t s)
