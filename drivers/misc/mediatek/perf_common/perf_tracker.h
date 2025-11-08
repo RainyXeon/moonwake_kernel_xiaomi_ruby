@@ -40,10 +40,13 @@ extern struct kobj_attribute perf_tracker_enable_attr;
 extern void perf_tracker(u64 wallclock,
 			long mm_available,
 			long mm_free);
+extern bool perf_tracker_is_enabled(void);
 extern bool hit_long_check(void);
 #else
 static inline void perf_tracker(u64 wallclock,
 				long mm_available,
 				long mm_free) {}
+static inline bool perf_tracker_is_enabled(void) { return false; }
+static inline bool hit_long_check(void) { return false; }
 #endif /* CONFIG_MTK_PERF_TRACKER */
 #endif /* _PERF_TRACKER_H */
