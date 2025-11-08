@@ -43,6 +43,12 @@ int perf_tracker_enable(int on)
 }
 EXPORT_SYMBOL(perf_tracker_enable);
 
+bool perf_tracker_is_enabled(void)
+{
+	return perf_tracker_on != 0;
+}
+EXPORT_SYMBOL(perf_tracker_is_enabled);
+
 unsigned int __attribute__((weak)) get_dram_data_rate(void)
 {
 	return 0;
