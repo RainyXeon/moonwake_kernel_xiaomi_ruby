@@ -57,6 +57,18 @@ extern "C" {
 	? ppm_main_info.cluster_info[id].dvfs_tbl[DVFS_OPP_NUM-1].frequency \
 	: 0)
 
+#define PPM_LITTLE_CLUSTER_ID		(0)
+#define PPM_LITTLE_IDLE_MAX_KHZ	(900000U)
+
+static inline int ppm_little_idle_floor_idx(void)
+{
+	if (PPM_LITTLE_CLUSTER_ID >= ppm_main_info.cluster_num)
+		return -1;
+
+	return ppm_main_freq_to_idx(PPM_LITTLE_CLUSTER_ID,
+		PPM_LITTLE_IDLE_MAX_KHZ, CPUFREQ_RELATION_H);
+}
+
 /* loop macros */
 #define for_each_ppm_clusters(i)	\
 	for (i = 0; i < ppm_main_info.cluster_num; i++)
