@@ -459,6 +459,20 @@ static void ppm_main_calc_new_limit(void)
 		);
 	}
 
+	if (PPM_LITTLE_CLUSTER_ID < c_req->cluster_num) {
+		struct ppm_client_limit *little_limit =
+			&c_req->cpu_limit[PPM_LITTLE_CLUSTER_ID];
+		int idle_idx = ppm_little_idle_floor_idx();
+
+		if (idle_idx >= 0 && little_limit->min_cpufreq_idx != -1 &&
+			little_limit->min_cpufreq_idx < idle_idx) {
+			little_limit->min_cpufreq_idx = idle_idx;
+			if (little_limit->has_advise_freq &&
+				little_limit->advise_cpufreq_idx < idle_idx)
+				little_limit->advise_cpufreq_idx = idle_idx;
+		}
+	}
+
 	/* always = 0 for ACAO */
 	c_req->root_cluster = 0;
 
