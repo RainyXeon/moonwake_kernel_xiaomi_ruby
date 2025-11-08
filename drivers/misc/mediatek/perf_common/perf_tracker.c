@@ -14,8 +14,14 @@
 #include <linux/swap.h>
 #include <helio-dvfsrc.h>
 
+#if IS_ENABLED(CONFIG_MTK_PERF_TRACKER_TRACE)
 #define CREATE_TRACE_POINTS
 #include <perf_tracker_trace.h>
+#else
+#define trace_perf_index_s(...) do { } while (0)
+#define trace_perf_index_l(...) do { } while (0)
+#define trace_perf_index_sbin(...) do { } while (0)
+#endif
 
 #ifdef CONFIG_MTK_QOS_FRAMEWORK
 #include <mtk_qos_sram.h>
