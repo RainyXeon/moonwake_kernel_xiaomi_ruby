@@ -16,6 +16,15 @@ config MTK_PERF_TRACKER
 	  via trace. If you are not sure about whether to enable it or not,
 	  please set n.
 
+config MTK_PERF_TRACKER_TRACE
+	bool "Enable perf tracker tracepoints"
+	depends on MTK_PERF_TRACKER
+	default n
+	help
+	  Select this to build perf tracker tracepoint instrumentation.
+	  Leave disabled on production builds to avoid the runtime overhead
+	  of tracepoint registration and data snapshots.
+
 config MTK_CORE_CTL
 	bool "MTK Core Control with CPU Isolation"
 	depends on MTK_SCHED_EXTENSION
