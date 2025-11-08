@@ -38,7 +38,7 @@
 #define RATIO_COUNT (100 / 5 - 1)
 #define IS_UP 1
 #define IS_DOWN 0
-#define USE_TIMER_CHECK_TIME msecs_to_jiffies(50)
+#define USE_TIMER_CHECK_TIME msecs_to_jiffies(256)
 #define CM_MGR_INIT_DELAY_MS 1
 #define CM_MGR_BW_VALUE 0
 
