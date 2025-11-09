@@ -72,6 +72,7 @@ static inline bool perf_do_check(u64 wallclock)
 	return do_check;
 }
 
+#ifdef CONFIG_MTK_PERF_TRACKER
 bool hit_long_check(void)
 {
 	bool do_check = false;
@@ -83,6 +84,7 @@ bool hit_long_check(void)
 	spin_unlock_irqrestore(&check_lock, flags);
 	return do_check;
 }
+#endif
 
 void perf_common(u64 wallclock)
 {
