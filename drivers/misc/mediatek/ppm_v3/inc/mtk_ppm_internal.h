@@ -60,15 +60,6 @@ extern "C" {
 #define PPM_LITTLE_CLUSTER_ID		(0)
 #define PPM_LITTLE_IDLE_MAX_KHZ	(900000U)
 
-static inline int ppm_little_idle_floor_idx(void)
-{
-	if (PPM_LITTLE_CLUSTER_ID >= ppm_main_info.cluster_num)
-		return -1;
-
-	return ppm_main_freq_to_idx(PPM_LITTLE_CLUSTER_ID,
-		PPM_LITTLE_IDLE_MAX_KHZ, CPUFREQ_RELATION_H);
-}
-
 /* loop macros */
 #define for_each_ppm_clusters(i)	\
 	for (i = 0; i < ppm_main_info.cluster_num; i++)
@@ -321,6 +312,15 @@ extern void ppm_clear_policy_limit(struct ppm_policy_data *policy);
 extern void ppm_main_clear_client_req(struct ppm_client_req *c_req);
 extern int ppm_main_register_policy(struct ppm_policy_data *policy);
 extern void ppm_main_unregister_policy(struct ppm_policy_data *policy);
+
+static inline int ppm_little_idle_floor_idx(void)
+{
+	if (PPM_LITTLE_CLUSTER_ID >= ppm_main_info.cluster_num)
+		return -1;
+
+	return ppm_main_freq_to_idx(PPM_LITTLE_CLUSTER_ID,
+		PPM_LITTLE_IDLE_MAX_KHZ, CPUFREQ_RELATION_H);
+}
 
 /* profiling */
 extern int ppm_profile_init(void);
