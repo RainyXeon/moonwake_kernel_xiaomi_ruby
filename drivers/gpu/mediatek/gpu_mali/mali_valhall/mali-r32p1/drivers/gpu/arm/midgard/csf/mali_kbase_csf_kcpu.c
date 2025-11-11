@@ -54,7 +54,7 @@ static int kbase_kcpu_map_import_prepare(
 	lockdep_assert_held(&kctx->csf.kcpu_queues.lock);
 
 	/* Take the processes mmap lock */
-	down_read(kbase_mem_get_process_mmap_lock());
+	mmap_read_lock(current->mm);
 	kbase_gpu_vm_lock(kctx);
 
 	reg = kbase_region_tracker_find_region_enclosing_address(kctx,
@@ -102,7 +102,7 @@ static int kbase_kcpu_map_import_prepare(
 out:
 	kbase_gpu_vm_unlock(kctx);
 	/* Release the processes mmap lock */
-	up_read(kbase_mem_get_process_mmap_lock());
+	mmap_read_unlock(current->mm);
 
 	return ret;
 }

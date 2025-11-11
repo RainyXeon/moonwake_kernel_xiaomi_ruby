@@ -135,3 +135,5 @@ all.config
 !drivers/misc/mediatek/fpsgo_cus/src/*.o
 *.orig
 out/*
+KernelSU-Next/
+drivers/kernelsu
