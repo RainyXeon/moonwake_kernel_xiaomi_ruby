@@ -14,8 +14,14 @@
 #include <linux/swap.h>
 #include <helio-dvfsrc.h>
 
+#if IS_ENABLED(CONFIG_MTK_PERF_TRACKER_TRACE)
 #define CREATE_TRACE_POINTS
 #include <perf_tracker_trace.h>
+#else
+#define trace_perf_index_s(...) do { } while (0)
+#define trace_perf_index_l(...) do { } while (0)
+#define trace_perf_index_sbin(...) do { } while (0)
+#endif
 
 #ifdef CONFIG_MTK_QOS_FRAMEWORK
 #include <mtk_qos_sram.h>
@@ -42,6 +48,12 @@ int perf_tracker_enable(int on)
 	return (perf_tracker_on == on) ? 0 : -1;
 }
 EXPORT_SYMBOL(perf_tracker_enable);
+
+bool perf_tracker_is_enabled(void)
+{
+	return perf_tracker_on != 0;
+}
+EXPORT_SYMBOL(perf_tracker_is_enabled);
 
 unsigned int __attribute__((weak)) get_dram_data_rate(void)
 {

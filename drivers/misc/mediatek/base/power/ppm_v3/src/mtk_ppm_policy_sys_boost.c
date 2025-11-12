@@ -117,6 +117,15 @@ static void ppm_sysboost_update_final_limit(void)
 		sysboost_final_limit.limit[i].max_freq_idx = max_freq_idx;
 		sysboost_final_limit.limit[i].min_core_num = min_core;
 		sysboost_final_limit.limit[i].max_core_num = max_core;
+
+		if (i == PPM_LITTLE_CLUSTER_ID &&
+			sysboost_final_limit.limit[i].min_freq_idx != -1) {
+			int idle_idx = ppm_little_idle_floor_idx();
+
+			if (idle_idx >= 0 &&
+				sysboost_final_limit.limit[i].min_freq_idx < idle_idx)
+				sysboost_final_limit.limit[i].min_freq_idx = idle_idx;
+		}
 	}
 
 	sysboost_final_limit.is_freq_limited_by_user = false;
@@ -192,6 +201,13 @@ void mt_ppm_sysboost_freq(enum ppm_sysboost_user user, unsigned int freq)
 					: ppm_main_freq_to_idx(i, freq,
 					CPUFREQ_RELATION_L);
 
+				if (freq_idx != -1 && i == PPM_LITTLE_CLUSTER_ID) {
+					int idle_idx = ppm_little_idle_floor_idx();
+
+					if (idle_idx >= 0 && freq_idx < idle_idx)
+						freq_idx = idle_idx;
+				}
+
 				/* error check */
 				if (data->limit[i].max_freq_idx != -1
 					&& freq_idx != -1
@@ -263,6 +279,15 @@ void mt_ppm_sysboost_set_freq_limit(enum ppm_sysboost_user user,
 				? -1
 				: ppm_main_freq_to_idx(cluster, max_freq,
 				CPUFREQ_RELATION_H);
+
+			if (data->limit[cluster].min_freq_idx != -1 &&
+				cluster == PPM_LITTLE_CLUSTER_ID) {
+				int idle_idx = ppm_little_idle_floor_idx();
+
+				if (idle_idx >= 0 &&
+					data->limit[cluster].min_freq_idx < idle_idx)
+					data->limit[cluster].min_freq_idx = idle_idx;
+			}
 
 			/* error check */
 			if (data->limit[cluster].min_freq_idx != -1
