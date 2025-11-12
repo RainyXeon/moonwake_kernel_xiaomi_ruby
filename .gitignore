@@ -137,3 +137,5 @@ all.config
 out/*
 KernelSU-Next/
 drivers/kernelsu
+MoonWake-Private-*
+ksu.sh
