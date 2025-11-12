@@ -5,6 +5,8 @@
 #define pr_fmt(fmt) "pob_qos: " fmt
 #include <linux/notifier.h>
 #include <mt-plat/mtk_perfobserver.h>
+#include <linux/pm.h>
+#include <linux/suspend.h>
 
 #include <linux/ktime.h>
 #include <linux/hrtimer.h>
@@ -29,7 +31,7 @@
 #endif
 
 #define MS_TO_NS 1000000
-#define ADJUST_INTERVAL_MS 32
+#define ADJUST_INTERVAL_MS 64
 
 enum POBQOS_NTF_PUSH_TYPE {
 	POBQOS_NTF_TIMER = 0x00,
@@ -44,6 +46,24 @@ struct POBQOS_NTF_PUSH_TAG {
 };
 
 #ifdef CONFIG_MTK_QOS_FRAMEWORK
+static DEFINE_MUTEX(pob_timer_lock);
+static bool pob_timer_active;
+
+#ifdef CONFIG_PM_SLEEP
+static bool pob_timer_needs_restart;
+
+static int pob_pm_notifier_cb(struct notifier_block *nb,
+			      unsigned long action, void *data);
+static struct notifier_block pob_pm_nb = {
+	.notifier_call = pob_pm_notifier_cb,
+};
+#endif
+
+static inline ktime_t pob_timer_interval(void)
+{
+	return ms_to_ktime(ADJUST_INTERVAL_MS);
+}
+
 static void pob_enable_timer(void);
 static void pob_disable_timer(void);
 
@@ -90,16 +110,62 @@ static struct hrtimer _pobqos_hrt;
 
 static void pob_enable_timer(void)
 {
-	ktime_t ktime;
+	ktime_t interval = pob_timer_interval();
 
-	ktime = ktime_set(0, ADJUST_INTERVAL_MS * MS_TO_NS);
-	hrtimer_start(&_pobqos_hrt, ktime, HRTIMER_MODE_REL);
+	mutex_lock(&pob_timer_lock);
+	if (pob_timer_active) {
+		mutex_unlock(&pob_timer_lock);
+		return;
+	}
+	pob_timer_active = true;
+	mutex_unlock(&pob_timer_lock);
+
+	hrtimer_start(&_pobqos_hrt, interval, HRTIMER_MODE_REL);
 }
 
 static void pob_disable_timer(void)
 {
-	hrtimer_cancel(&_pobqos_hrt);
+	bool should_cancel = false;
+
+	mutex_lock(&pob_timer_lock);
+	if (pob_timer_active) {
+		pob_timer_active = false;
+		should_cancel = true;
+	}
+	mutex_unlock(&pob_timer_lock);
+
+	if (should_cancel)
+		hrtimer_cancel(&_pobqos_hrt);
 }
+
+#ifdef CONFIG_PM_SLEEP
+static int pob_pm_notifier_cb(struct notifier_block *nb,
+			      unsigned long action, void *data)
+{
+	switch (action) {
+	case PM_SUSPEND_PREPARE:
+	case PM_HIBERNATION_PREPARE:
+		mutex_lock(&pob_timer_lock);
+		pob_timer_needs_restart = pob_timer_active;
+		mutex_unlock(&pob_timer_lock);
+
+		if (pob_timer_needs_restart)
+			pob_disable_timer();
+		break;
+	case PM_POST_SUSPEND:
+	case PM_POST_HIBERNATION:
+		if (pob_timer_needs_restart) {
+			pob_enable_timer();
+			pob_timer_needs_restart = false;
+		}
+		break;
+	default:
+		break;
+	}
+
+	return NOTIFY_OK;
+}
+#endif
 
 static void pobqos_hrt_wq_cb(struct work_struct *psWork)
 {
@@ -192,11 +258,13 @@ final:
 static enum hrtimer_restart pobqos_hrt_cb(struct hrtimer *timer)
 {
 	struct POBQOS_NTF_PUSH_TAG *vpPush = NULL;
+	ktime_t interval;
 
-	ktime_t ktime;
+	if (!READ_ONCE(pob_timer_active))
+		return HRTIMER_NORESTART;
 
-	ktime = ktime_set(0, ADJUST_INTERVAL_MS * MS_TO_NS);
-	hrtimer_add_expires(timer, ktime);
+	interval = pob_timer_interval();
+	hrtimer_forward_now(timer, interval);
 
 	if (_gpPOBQoSNtfWQ)
 		vpPush =
@@ -275,11 +343,18 @@ int __init pob_qos_pfm_init(void)
 
 	register_qos_notifier(&pob_pfm_qos_notifier);
 
+#ifdef CONFIG_PM_SLEEP
+	register_pm_notifier(&pob_pm_nb);
+#endif
+
 	return 0;
 }
 
 void __exit pob_qos_pfm_exit(void)
 {
+#ifdef CONFIG_PM_SLEEP
+	unregister_pm_notifier(&pob_pm_nb);
+#endif
 	unregister_qos_notifier(&pob_pfm_qos_notifier);
 }
 
@@ -294,6 +369,9 @@ int pob_qos_pfm_enable(void)
 int pob_qos_pfm_disable(void)
 {
 	pob_disable_timer();
+#ifdef CONFIG_PM_SLEEP
+	pob_timer_needs_restart = false;
+#endif
 	pob_qos_set_last_time_ms(1);
 
 	return 0;

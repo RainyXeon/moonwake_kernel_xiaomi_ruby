@@ -110,5 +110,6 @@ extern void cm_mgr_common_exit(void);
 /* platform api */
 extern void cm_mgr_perf_platform_set_status(int enable);
 extern void cm_mgr_perf_platform_set_force_status(int enable);
+void cm_mgr_display_idle_notify(bool panel_on);
 
 #endif	/* __MTK_CM_MGR_H__ */

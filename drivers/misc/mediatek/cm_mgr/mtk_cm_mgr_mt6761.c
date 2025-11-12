@@ -220,6 +220,11 @@ static struct stall_s stall_all;
 static struct stall_s *pstall_all = &stall_all;
 static int cm_mgr_idx = -1;
 
+static DEFINE_MUTEX(cm_mgr_poll_lock);
+static bool cm_mgr_poll_ready;
+static bool cm_mgr_poll_paused = true;
+static bool cm_mgr_desired_poll_enabled = true;
+
 #ifdef USE_DEBUG_LOG
 static void debug_stall(int cpu)
 {
@@ -631,6 +636,7 @@ static void update_v2f(int update, int debug)
 	}
 }
 
+static void cm_mgr_handle_display_state(bool enable);
 static void check_cm_mgr_status_internal(void);
 #ifdef USE_TIMER_CHECK
 struct timer_list cm_mgr_timer;
@@ -815,12 +821,65 @@ static int cm_mgr_check_down_status(int level, int *cpu_ratio_idx)
 }
 
 struct timer_list cm_mgr_perf_timer;
-#define USE_TIMER_PERF_CHECK_TIME msecs_to_jiffies(50)
+#define CM_MGR_POLL_INTERVAL_MS 256
+#define CM_MGR_POLL_INTERVAL_JIFFIES \
+	msecs_to_jiffies(CM_MGR_POLL_INTERVAL_MS)
+#define USE_TIMER_PERF_CHECK_TIME CM_MGR_POLL_INTERVAL_JIFFIES
 
 static void cm_mgr_perf_timer_fn(struct timer_list *t)
 {
 	if (cm_mgr_perf_timer_enable)
 		check_cm_mgr_status_internal();
+}
+
+static void cm_mgr_handle_display_state(bool enable)
+{
+	unsigned long expires;
+
+	mutex_lock(&cm_mgr_poll_lock);
+	cm_mgr_desired_poll_enabled = enable;
+	if (!cm_mgr_poll_ready) {
+		mutex_unlock(&cm_mgr_poll_lock);
+		return;
+	}
+
+	if (enable) {
+		if (!cm_mgr_poll_paused) {
+			mutex_unlock(&cm_mgr_poll_lock);
+			return;
+		}
+		cm_mgr_poll_paused = false;
+#ifdef USE_TIMER_CHECK
+		cm_mgr_timer_enable = 1;
+#endif
+		cm_mgr_perf_timer_enable = 1;
+		expires = jiffies + CM_MGR_POLL_INTERVAL_JIFFIES;
+		mod_timer(&cm_mgr_perf_timer, expires);
+		mutex_unlock(&cm_mgr_poll_lock);
+		check_cm_mgr_status_internal();
+		return;
+	}
+
+	if (cm_mgr_poll_paused) {
+		mutex_unlock(&cm_mgr_poll_lock);
+		return;
+	}
+
+	cm_mgr_poll_paused = true;
+	cm_mgr_perf_timer_enable = 0;
+#ifdef USE_TIMER_CHECK
+	cm_mgr_timer_enable = 0;
+#endif
+	del_timer_sync(&cm_mgr_perf_timer);
+#ifdef USE_TIMER_CHECK
+	del_timer_sync(&cm_mgr_timer);
+#endif
+	mutex_unlock(&cm_mgr_poll_lock);
+}
+
+void cm_mgr_display_idle_notify(bool panel_on)
+{
+	cm_mgr_handle_display_state(panel_on);
 }
 
 static void check_cm_mgr_status_internal(void)
@@ -1238,6 +1297,11 @@ static int platform_cm_mgr_probe(struct platform_device *pdev)
 	spin_lock_init(&cm_mgr_lock);
 
 	vcore_power_gain = vcore_power_gain_ptr(cm_mgr_get_idx());
+
+	mutex_lock(&cm_mgr_poll_lock);
+	cm_mgr_poll_ready = true;
+	mutex_unlock(&cm_mgr_poll_lock);
+	cm_mgr_handle_display_state(cm_mgr_desired_poll_enabled);
 
 	return 0;
 

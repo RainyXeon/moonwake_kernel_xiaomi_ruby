@@ -133,6 +133,12 @@ unsigned int mt_ppm_userlimit_cpu_freq(
 		min_freq_idx = (min_freq == -1) ? -1
 				: ppm_main_freq_to_idx(i, min_freq,
 				CPUFREQ_RELATION_L);
+		if (min_freq_idx != -1 && i == PPM_LITTLE_CLUSTER_ID) {
+			int idle_idx = ppm_little_idle_floor_idx();
+
+			if (idle_idx >= 0 && min_freq_idx < idle_idx)
+				min_freq_idx = idle_idx;
+		}
 		max_freq_idx = (max_freq == -1) ? -1
 				: ppm_main_freq_to_idx(i, max_freq,
 				CPUFREQ_RELATION_H);
@@ -196,6 +202,12 @@ static int mt_ppm_userlimit_set_min_freq(struct ppm_user_limit *limit, int min_f
 	idx = (min_freq == -1) ? -1
 		: ppm_main_freq_to_idx(id, min_freq,
 		CPUFREQ_RELATION_L);
+	if (idx != -1 && id == PPM_LITTLE_CLUSTER_ID) {
+		int idle_idx = ppm_little_idle_floor_idx();
+
+		if (idle_idx >= 0 && idx < idle_idx)
+			idx = idle_idx;
+	}
 
 	/* error check, sync to max idx if min freq > max freq */
 	if (limit->max_freq_idx != -1
