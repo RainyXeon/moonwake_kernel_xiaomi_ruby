@@ -37,6 +37,7 @@
 #include "../mediatek/mtk_corner_pattern/mtk_data_hw_roundedpattern.h"
 #endif
 
+#define ENABLE_30HZ 1
 #define REGFLAG_CMD			0xFFFA
 #define REGFLAG_DELAY			0xFFFC
 #define REGFLAG_UDELAY			0xFFFB
