@@ -56,11 +56,6 @@ struct st_susfs_sus_mount {
 	int                                     err;
 };
 
-struct st_susfs_sus_mount_list {
-	struct list_head                        list;
-	struct st_susfs_sus_mount               info;
-};
-
 struct st_susfs_hide_sus_mnts_for_all_procs {
 	bool                                    enabled;
 	int                                     err;

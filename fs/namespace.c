@@ -1133,7 +1133,7 @@ struct vfsmount *vfs_create_mount(struct fs_context *fc)
 
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	// We keep checking for ksu process
-	if (susfs_is_current_ksu_domain()) {
+	if (!susfs_is_boot_completed_triggered && susfs_is_current_ksu_domain()) {
 		mnt = susfs_alloc_sus_vfsmnt(fc->source ?: "none");
 		goto bypass_orig_flow;
 	}
@@ -2564,7 +2564,7 @@ static int do_loopback(struct path *path, const char *old_name,
 #if defined(CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT) || defined(CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT)
 	// - Check if bind mounted path should be hidden and umounted automatically.
 	// And we target only process with ksu domain.
-	if (susfs_is_current_ksu_domain()) {
+	if (!susfs_is_boot_completed_triggered && susfs_is_current_ksu_domain()) {
 #if defined(CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT)
 		if (susfs_is_auto_add_sus_bind_mount_enabled) {
 			susfs_auto_add_sus_bind_mount(old_name, &old_path);
@@ -3961,6 +3961,17 @@ void susfs_reorder_mnt_id(void) {
 		WRITE_ONCE(mnt->mnt_id, first_mnt_id++);
 	}
 	put_mnt_ns(mnt_ns);
+}
+
+void susfs_assign_fake_mnt_id(struct mount *mnt) {
+	lock_mount_hash();
+
+	ida_free(&mnt_id_ida, mnt->mnt_id);
+
+	mnt->mnt_id = DEFAULT_KSU_MNT_ID;
+	mnt->mnt_group_id = ida_alloc_min(&susfs_ksu_mnt_group_ida, DEFAULT_KSU_MNT_GROUP_ID, GFP_KERNEL);
+
+	unlock_mount_hash();
 }
 #endif
 
