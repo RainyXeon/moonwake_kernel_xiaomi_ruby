@@ -27,22 +27,23 @@
 #include <linux/task_work.h>
 #include <linux/sched/task.h>
 #include <linux/fs_context.h>
-#if defined(CONFIG_KSU_SUSFS_SUS_MOUNT) || defined(CONFIG_KSU_SUSFS_TRY_UMOUNT)
+#if defined(CONFIG_KSU_SUSFS_SUS_MOUNT) || defined(CONFIG_KSU_SUSFS_TRY_UMOUNT) || defined(CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT) || defined(CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT) || defined(CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT)
 #include <linux/susfs_def.h>
 #endif
 
 #include "pnode.h"
 #include "internal.h"
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#if defined(CONFIG_KSU_SUSFS_SUS_MOUNT) || defined(CONFIG_KSU_SUSFS_TRY_UMOUNT) || defined(CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT) || defined(CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT) || defined(CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT)
 extern bool susfs_is_current_ksu_domain(void);
 extern bool susfs_is_current_zygote_domain(void);
 extern bool susfs_is_boot_completed_triggered;
 
 static DEFINE_IDA(susfs_ksu_mnt_group_ida);
+static atomic64_t susfs_ksu_mounts = ATOMIC64_INIT(0);
 
 #define CL_COPY_MNT_NS BIT(25) /* used by copy_mnt_ns() */
-#endif
+#endif // #if defined(CONFIG_KSU_SUSFS_SUS_MOUNT) || defined(CONFIG_KSU_SUSFS_TRY_UMOUNT) || defined(CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT) || defined(CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT) || defined(CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT)
 
 #ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
 extern void susfs_auto_add_sus_ksu_default_mount(const char __user *to_pathname);
@@ -1135,6 +1136,7 @@ struct vfsmount *vfs_create_mount(struct fs_context *fc)
 	// We keep checking for ksu process
 	if (!susfs_is_boot_completed_triggered && susfs_is_current_ksu_domain()) {
 		mnt = susfs_alloc_sus_vfsmnt(fc->source ?: "none");
+		atomic64_add(1, &susfs_ksu_mounts);
 		goto bypass_orig_flow;
 	}
 orig_flow:
@@ -3949,7 +3951,10 @@ void susfs_reorder_mnt_id(void) {
 	if (!mnt_ns) {
 		return;
 	}
-
+	// Do not reorder the mnt_id if there is no any ksu mount at all
+	if (atomic64_read(&susfs_ksu_mounts) == 0) {
+		return;
+	}
 	get_mnt_ns(mnt_ns);
 	first_mnt_id = list_first_entry(&mnt_ns->list, struct mount, mnt_list)->mnt_id;
 	list_for_each_entry(mnt, &mnt_ns->list, mnt_list) {
@@ -3970,21 +3975,8 @@ void susfs_assign_fake_mnt_id(struct mount *mnt) {
 
 	mnt->mnt_id = DEFAULT_KSU_MNT_ID;
 	mnt->mnt_group_id = ida_alloc_min(&susfs_ksu_mnt_group_ida, DEFAULT_KSU_MNT_GROUP_ID, GFP_KERNEL);
+	atomic64_add(1, &susfs_ksu_mounts);
 
 	unlock_mount_hash();
-}
-#endif
-
-#ifdef CONFIG_KSU_SUSFS
-bool susfs_is_mnt_devname_ksu(struct path *path) {
-	struct mount *mnt;
-
-	if (path && path->mnt) {
-		mnt = real_mount(path->mnt);
-		if (mnt && mnt->mnt_devname && !strcmp(mnt->mnt_devname, "KSU")) {
-			return true;
-		}
-	}
-	return false;
 }
 #endif

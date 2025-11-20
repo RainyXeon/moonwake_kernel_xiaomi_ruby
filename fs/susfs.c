@@ -856,7 +856,7 @@ void susfs_sus_ino_for_show_map_vma(unsigned long ino, dev_t *out_dev, unsigned 
 /* try_umount */
 #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
 static DEFINE_SPINLOCK(susfs_spin_lock_try_umount);
-extern void try_umount(const char *mnt, bool check_mnt, int flags);
+extern void try_umount(const char *mnt, int flags);
 static LIST_HEAD(LH_TRY_UMOUNT_PATH);
 void susfs_add_try_umount(void __user **user_info) {
 	struct st_susfs_try_umount info = {0};
@@ -903,7 +903,7 @@ void susfs_try_umount(void) {
 
 	// We should umount in reversed order
 	list_for_each_entry_reverse(cursor, &LH_TRY_UMOUNT_PATH, list) {
-		try_umount(cursor->info.target_pathname, false, cursor->info.mnt_mode);
+		try_umount(cursor->info.target_pathname, cursor->info.mnt_mode);
 	}
 }
 
