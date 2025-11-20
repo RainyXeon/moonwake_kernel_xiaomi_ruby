@@ -1736,13 +1736,20 @@ static ssize_t disksize_store(struct device *dev,
 		goto out_unlock;
 	}
 
-	comp = zcomp_create(zram->compressor);
-	if (IS_ERR(comp)) {
-		pr_err("Cannot initialise %s compressing backend\n",
-				zram->compressor);
-		err = PTR_ERR(comp);
-		goto out_free_meta;
-	}
+    comp = zcomp_create(CONFIG_ZRAM_DEF_COMP);
+    if (IS_ERR(comp)) {
+        comp = zcomp_create(zram->compressor);
+        if (IS_ERR(comp)) {
+            pr_err("Cannot initialise %s compressing backend\n",
+                   zram->compressor);
+            err = PTR_ERR(comp);
+            goto out_free_meta;
+        }
+        strlcpy(zram->compressor, zram->compressor, sizeof(zram->compressor));
+    } else {
+        strlcpy(zram->compressor, CONFIG_ZRAM_DEF_COMP, sizeof(zram->compressor));
+    }
+
 
 	zram->comp = comp;
 	zram->disksize = disksize;
@@ -1877,6 +1884,9 @@ static const struct attribute_group *zram_disk_attr_groups[] = {
 	NULL,
 };
 
+/* ZRAM comperssor override */
+extern char *zram_compressor_override __read_mostly;
+
 /*
  * Allocate and initialize new zram device. the function returns
  * '>= 0' device_id upon success, and negative value otherwise.
@@ -1961,7 +1971,6 @@ static int zram_add(void)
 			(BDI_CAP_STABLE_WRITES | BDI_CAP_SYNCHRONOUS_IO);
 	disk_to_dev(zram->disk)->groups = zram_disk_attr_groups;
 	add_disk(zram->disk);
-
 	strlcpy(zram->compressor, default_compressor, sizeof(zram->compressor));
 
 	zram_debugfs_register(zram);
