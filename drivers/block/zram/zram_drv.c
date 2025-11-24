@@ -992,6 +992,13 @@ static ssize_t comp_algorithm_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t len)
 {
 	struct zram *zram = dev_to_zram(dev);
+
+    /* NEW LOGIC HERE */
+    if (!zram->allow_comp_override) {
+        pr_info("zram: ignoring compressor override (not ready): %s", buf);
+        return len;
+    }
+
 	char compressor[ARRAY_SIZE(zram->compressor)];
 	size_t sz;
 
@@ -1736,20 +1743,13 @@ static ssize_t disksize_store(struct device *dev,
 		goto out_unlock;
 	}
 
-    comp = zcomp_create(CONFIG_ZRAM_DEF_COMP);
-    if (IS_ERR(comp)) {
-        comp = zcomp_create(zram->compressor);
-        if (IS_ERR(comp)) {
-            pr_err("Cannot initialise %s compressing backend\n",
-                   zram->compressor);
-            err = PTR_ERR(comp);
-            goto out_free_meta;
-        }
-        strlcpy(zram->compressor, zram->compressor, sizeof(zram->compressor));
-    } else {
-        strlcpy(zram->compressor, CONFIG_ZRAM_DEF_COMP, sizeof(zram->compressor));
-    }
-
+	comp = zcomp_create(zram->compressor);
+	if (IS_ERR(comp)) {
+		pr_err("Cannot initialise %s compressing backend\n",
+			zram->compressor);
+		err = PTR_ERR(comp);
+		goto out_free_meta;
+	}
 
 	zram->comp = comp;
 	zram->disksize = disksize;
@@ -1827,6 +1827,27 @@ static int zram_open(struct block_device *bdev, fmode_t mode)
 	return ret;
 }
 
+static ssize_t allow_comp_override_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+    struct zram *zram = dev_to_zram(dev);
+    return sprintf(buf, "%d\n", zram->allow_comp_override ? 1 : 0);
+}
+
+static ssize_t allow_comp_override_store(struct device *dev,
+        struct device_attribute *attr, const char *buf, size_t len)
+{
+    struct zram *zram = dev_to_zram(dev);
+    unsigned long val;
+
+    if (kstrtoul(buf, 10, &val))
+        return -EINVAL;
+
+    zram->allow_comp_override = (val != 0);
+
+    pr_info("zram: allow_comp_override = %d\n", zram->allow_comp_override);
+    return len;
+}
+
 static const struct block_device_operations zram_devops = {
 	.open = zram_open,
 	.swap_slot_free_notify = zram_slot_free_notify,
@@ -1834,6 +1855,7 @@ static const struct block_device_operations zram_devops = {
 	.owner = THIS_MODULE
 };
 
+static DEVICE_ATTR_RW(allow_comp_override);
 static DEVICE_ATTR_WO(compact);
 static DEVICE_ATTR_RW(disksize);
 static DEVICE_ATTR_RO(initstate);
@@ -1851,6 +1873,7 @@ static DEVICE_ATTR_RW(writeback_limit_enable);
 #endif
 
 static struct attribute *zram_disk_attrs[] = {
+    &dev_attr_allow_comp_override.attr,
 	&dev_attr_disksize.attr,
 	&dev_attr_initstate.attr,
 	&dev_attr_reset.attr,
