@@ -46,7 +46,7 @@
 
 /*
  * mount->mnt.susfs_mnt_id_backup => storing original mount's mnt_id
- * inode->i_mapping->flags => storing flag 'AS_FLAGS_'
+ * inode->i_mapping->flags => A 'unsigned long' type storing flag 'AS_FLAGS_', bit 1 to 31 is not usable since 6.12
  * nd->state => storing flag 'ND_STATE_'
  * nd->flags => storing flag 'ND_FLAGS_'
  * task_struct->thread_info.flags => storing flag 'TIF_'
@@ -54,20 +54,20 @@
  // thread_info->flags is unsigned long :D
 #define TIF_PROC_UMOUNTED 33
 
-#define AS_FLAGS_SUS_PATH 24
-#define AS_FLAGS_SUS_MOUNT 25
-#define AS_FLAGS_SUS_KSTAT 26
-#define AS_FLAGS_OPEN_REDIRECT 27
-#define AS_FLAGS_ANDROID_DATA_ROOT_DIR 28
-#define AS_FLAGS_SDCARD_ROOT_DIR 29
-#define AS_FLAGS_SUS_MAP 30
-#define BIT_SUS_PATH BIT(24)
-#define BIT_SUS_MOUNT BIT(25)
-#define BIT_SUS_KSTAT BIT(26)
-#define BIT_OPEN_REDIRECT BIT(27)
-#define BIT_ANDROID_DATA_ROOT_DIR BIT(28)
-#define BIT_ANDROID_SDCARD_ROOT_DIR BIT(29)
-#define BIT_SUS_MAPS BIT(30)
+#define AS_FLAGS_SUS_PATH 33
+#define AS_FLAGS_SUS_MOUNT 34
+#define AS_FLAGS_SUS_KSTAT 35
+#define AS_FLAGS_OPEN_REDIRECT 36
+#define AS_FLAGS_ANDROID_DATA_ROOT_DIR 37
+#define AS_FLAGS_SDCARD_ROOT_DIR 38
+#define AS_FLAGS_SUS_MAP 39
+#define BIT_SUS_PATH BIT(33)
+#define BIT_SUS_MOUNT BIT(34)
+#define BIT_SUS_KSTAT BIT(35)
+#define BIT_OPEN_REDIRECT BIT(36)
+#define BIT_ANDROID_DATA_ROOT_DIR BIT(37)
+#define BIT_ANDROID_SDCARD_ROOT_DIR BIT(38)
+#define BIT_SUS_MAPS BIT(39)
 
 #define ND_STATE_LOOKUP_LAST 32
 #define ND_STATE_OPEN_LAST 64
