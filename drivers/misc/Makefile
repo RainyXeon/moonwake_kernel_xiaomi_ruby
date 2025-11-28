@@ -2,7 +2,6 @@
 #
 # Makefile for misc devices that really don't fit anywhere else.
 #
-
 obj-$(CONFIG_IBM_ASM)		+= ibmasm/
 obj-$(CONFIG_IBMVMC)		+= ibmvmc.o
 obj-$(CONFIG_AD525X_DPOT)	+= ad525x_dpot.o
@@ -62,3 +61,4 @@ obj-$(CONFIG_UID_SYS_STATS)	+= uid_sys_stats.o
 obj-y				+= mediatek/
 obj-y                           += hwid/
 obj-$(CONFIG_SIMTRAY_STATUS)	+= simtray.o
+obj-$(CONFIG_KPROFILES)     += kprofiles/
