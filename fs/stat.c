@@ -199,14 +199,14 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
 
 #ifdef CONFIG_KSU_SUSFS
 	if (likely(susfs_is_current_proc_umounted())) {
-		goto orig_flow;
+		goto orig_flow1;
 	}
 
 	if (unlikely(__ksu_is_allow_uid_for_current(current_uid().val))) {
 		ksu_handle_stat(&dfd, &filename, &flags);
 	}
 
-orig_flow:
+orig_flow1:
 #endif
 
 	if ((flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT |
