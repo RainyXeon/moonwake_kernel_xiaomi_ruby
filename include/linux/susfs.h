@@ -50,6 +50,12 @@ struct st_external_dir {
 
 /* sus_mount */
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+struct st_susfs_sus_mount {
+	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+	unsigned long                           target_dev;
+	int                                     err;
+};
+
 struct st_susfs_hide_sus_mnts_for_all_procs {
 	bool                                    enabled;
 	int                                     err;
