@@ -1622,6 +1622,8 @@ source "drivers/acpi/Kconfig"
 
 source "arch/arm64/kvm/Kconfig"
 
+source "nethunter/Kconfig"
+
 if CRYPTO
 source "arch/arm64/crypto/Kconfig"
 endif
