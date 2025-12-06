@@ -1176,7 +1176,7 @@ bypass_orig_flow:
 			rcu_read_lock();
 			mnt_id = list_first_entry(&mnt_ns->list, struct mount, mnt_list)->mnt_id;
 			list_for_each_entry_rcu(m, &mnt_ns->list, mnt_list) {
-				if (m->mnt_id < DEFAULT_SUS_MNT_ID) {
+				if (m->mnt_id < DEFAULT_KSU_MNT_ID) {
 					mnt_id++;
 				}
 			}
