@@ -835,6 +835,7 @@ static struct drm_display_mode mode_60hz = {
 	.vrefresh = 60,
 };
 
+#ifdef ENABLE_90HZ
 static struct drm_display_mode mode_90hz = {
 	.clock = 328316, // changed
 	.hdisplay = 1080,
@@ -847,6 +848,7 @@ static struct drm_display_mode mode_90hz = {
 	.vtotal = 2400 + 822 + 4 + 8,	//VBP changed
 	.vrefresh = 90,
 };
+#endif
 
 static struct drm_display_mode mode_120hz = {
 	.clock = 331162, // changed
@@ -1017,6 +1019,7 @@ static struct mtk_panel_params ext_params_60hz = {
 	.physical_height_um = PHYSICAL_HEIGHT,
 };
 
+#ifdef ENABLE_90HZ
 static struct mtk_panel_params ext_params_90hz = {
 	.lcm_index = 2,
 	.pll_clk = DATA_RATE / 2,
@@ -1093,6 +1096,7 @@ static struct mtk_panel_params ext_params_90hz = {
 	.physical_width_um = PHYSICAL_WIDTH,
 	.physical_height_um = PHYSICAL_HEIGHT,
 };
+#endif
 
 static struct mtk_panel_params ext_params_120hz = {
 	.lcm_index = 2,
@@ -1203,8 +1207,10 @@ static int mtk_panel_ext_param_set(struct drm_panel *panel, unsigned int mode)
 	if (drm_mode_vrefresh(m) == 60)
 #endif
 		ext->params = &ext_params_60hz;
+#ifdef ENABLE_90HZ
 	else if (drm_mode_vrefresh(m) == 90)
 		ext->params = &ext_params_90hz;
+#endif
 	else if (drm_mode_vrefresh(m) == 120)
 		ext->params = &ext_params_120hz;
 	else
@@ -1608,7 +1614,9 @@ static int lcm_get_modes(struct drm_panel *panel)
 	struct drm_display_mode *mode_30;
 #endif
 	struct drm_display_mode *mode_60;
+#ifdef ENABLE_90HZ
 	struct drm_display_mode *mode_90;
+#endif
 	struct drm_display_mode *mode_120;
 
 #ifdef ENABLE_30HZ
@@ -1635,6 +1643,7 @@ static int lcm_get_modes(struct drm_panel *panel)
 	mode_60->type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED;
 	drm_mode_probed_add(panel->connector, mode_60);
 
+#ifdef ENABLE_90HZ
 	mode_90 = drm_mode_duplicate(panel->drm, &mode_90hz);
 	if (!mode_90) {
 		dev_err(panel->drm->dev, "failed to add mode %ux%ux@%u\n",
@@ -1645,6 +1654,7 @@ static int lcm_get_modes(struct drm_panel *panel)
 	drm_mode_set_name(mode_90);
 	mode_90->type = DRM_MODE_TYPE_DRIVER;
 	drm_mode_probed_add(panel->connector, mode_90);
+#endif
 
 	mode_120 = drm_mode_duplicate(panel->drm, &mode_120hz);
 	if (!mode_120) {
@@ -1750,8 +1760,11 @@ static int lcm_probe(struct mipi_dsi_device *dsi)
 	ext_params_30hz.err_flag_irq_flags = ext_params_60hz.err_flag_irq_flags;
 #endif
 
+#ifdef ENABLE_90HZ
 	ext_params_90hz.err_flag_irq_gpio = ext_params_60hz.err_flag_irq_gpio;
 	ext_params_90hz.err_flag_irq_flags = ext_params_60hz.err_flag_irq_flags;
+#endif
+
 	ext_params_120hz.err_flag_irq_gpio = ext_params_60hz.err_flag_irq_gpio;
 	ext_params_120hz.err_flag_irq_flags = ext_params_60hz.err_flag_irq_flags;
 
