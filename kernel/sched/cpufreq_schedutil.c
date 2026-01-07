@@ -616,6 +616,8 @@ static unsigned int sugov_next_freq_shared(struct sugov_cpu *sg_cpu, u64 time)
 	unsigned long util = 0, max = 1;
 	unsigned int j;
 	unsigned int next_f;
+	unsigned long cpu_min_util;
+	unsigned long boosted_util;
 #ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
 	int cid;
 #endif
@@ -637,6 +639,20 @@ static unsigned int sugov_next_freq_shared(struct sugov_cpu *sg_cpu, u64 time)
 			max = j_max;
 		}
 	}
+
+	/*
+	 * Enforce CPU minimum frequency capacity as a utilization floor.
+	 * This keeps schedutil frequency selection aligned with policy->min.
+	 */
+	cpu_min_util = arch_scale_min_freq_capacity(policy->cpu);
+	if (cpu_min_util) {
+		/*
+		 * Scale min util to this policy's max capacity
+		 */
+		boosted_util = max(util, cpu_min_util + (cpu_min_util >> 3));
+		util = boosted_util;
+	}
+
 
 	next_f = get_next_freq(sg_policy, util, max);
 

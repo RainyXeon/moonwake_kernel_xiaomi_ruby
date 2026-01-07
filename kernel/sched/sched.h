@@ -69,6 +69,7 @@
 
 #include <asm/tlb.h>
 
+
 #ifdef CONFIG_PARAVIRT
 # include <asm/paravirt.h>
 #endif
@@ -2395,6 +2396,7 @@ unsigned long uclamp_rq_util_with(struct rq *rq, unsigned long util,
 {
 	unsigned long min_util = 0;
 	unsigned long max_util = 0;
+	unsigned long cpu_min_util;
 
 	if (!static_branch_likely(&sched_uclamp_used))
 		return util;
@@ -2412,6 +2414,14 @@ unsigned long uclamp_rq_util_with(struct rq *rq, unsigned long util,
 	}
 
 	min_util = max_t(unsigned long, min_util, READ_ONCE(rq->uclamp[UCLAMP_MIN].value));
+
+	/*
+	 * Enforce CPU minimum frequency as a utilization floor.
+	 * This models policy-enforced min frequency as a CPU-level uclamp.min.
+	 */
+	cpu_min_util = arch_scale_min_freq_capacity(cpu_of(rq));
+	min_util = max_t(unsigned long, min_util, cpu_min_util >> 1);
+
 	max_util = max_t(unsigned long, max_util, READ_ONCE(rq->uclamp[UCLAMP_MAX].value));
 out:
 	/*
@@ -2494,7 +2504,20 @@ bool uclamp_boosted(struct task_struct *p);
 #ifdef CONFIG_SMP
 static inline unsigned long capacity_orig_of(int cpu)
 {
-	return cpu_rq(cpu)->cpu_capacity_orig;
+	unsigned long cap = cpu_rq(cpu)->cpu_capacity_orig;
+	unsigned long min_cap = arch_scale_min_freq_capacity(cpu);
+
+	if (min_cap) {
+		/*
+		 * Reduce usable capacity by min_freq floor,
+		 * but never drop below 50% of original capacity to avoid
+		 * load-balance pathologies.
+		 */
+		unsigned long reduced = cap > min_cap ? cap - min_cap : 0;
+		cap = max(cap >> 1, reduced);
+	}
+
+	return cap;
 }
 #endif
 

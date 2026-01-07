@@ -5863,7 +5863,19 @@ static unsigned long target_load(int cpu, int type)
 
 static unsigned long capacity_of(int cpu)
 {
-	return cpu_rq(cpu)->cpu_capacity;
+	unsigned long cap = cpu_rq(cpu)->cpu_capacity;
+
+	/*
+	 * EAS-lite: penalize CPUs with high enforced min frequency.
+	 */
+	if (static_branch_likely(&sched_uclamp_used)) {
+		unsigned long min_cap = arch_scale_min_freq_capacity(cpu);
+
+		/* 12.5%–25% penalty is safe */
+		cap -= min_cap >> 3;
+	}
+
+	return max(cap, 1UL);
 }
 
 static unsigned long cpu_avg_load_per_task(int cpu)
@@ -6562,10 +6574,31 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, int t
 	cpumask_and(cpus, sched_domain_span(sd), &p->cpus_allowed);
 
 	for_each_cpu_wrap(cpu, cpus, target) {
+		/* Do not bias latency-sensitive / foreground tasks */
+		if (p->prio < DEFAULT_PRIO)
+			goto skip_bias;
+
+		/*
+		 * Wakeup placement bias (EAS-lite):
+		 * Skip CPUs whose enforced minimum frequency is far above
+		 * the task's expected utilization.
+		 */
+		if (static_branch_likely(&sched_uclamp_used)) {
+			unsigned long min_cap = arch_scale_min_freq_capacity(cpu);
+			unsigned long task_util = task_util_est(p);
+
+			/* Allow headroom; only skip on large mismatch */
+			if (task_util && task_util < (min_cap >> 1))
+				goto next_cpu;
+		}
+skip_bias:
 		if (!--nr)
 			return -1;
 		if (available_idle_cpu(cpu))
 			break;
+
+next_cpu:
+		continue;
 	}
 
 	time = local_clock() - time;
