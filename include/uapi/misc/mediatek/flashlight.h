@@ -1,50 +1,18 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
- * Copyright (c) 2019 MediaTek Inc.
+ * MediaTek Flashlight UAPI
+ *
+ * This header is consumed by userspace (e.g. camera torch control) via
+ * <misc/mediatek/flashlight.h>.
  */
 
-#ifndef _FLASHLIGHT_H
-#define _FLASHLIGHT_H
+#ifndef _UAPI_MISC_MEDIATEK_FLASHLIGHT_H
+#define _UAPI_MISC_MEDIATEK_FLASHLIGHT_H
 
-#include <linux/types.h>
 #include <linux/ioctl.h>
-
-/* device node and sysfs */
-#define FLASHLIGHT_CORE             "flashlight_core"
-#define FLASHLIGHT_DEVNAME          "flashlight"
-#define FLASHLIGHT_SYSFS_STROBE     "flashlight_strobe"
-#define FLASHLIGHT_SYSFS_PT         "flashlight_pt"
-#define FLASHLIGHT_SYSFS_CHARGER    "flashlight_charger"
-#define FLASHLIGHT_SYSFS_CURRENT    "flashlight_current"
-#define FLASHLIGHT_SYSFS_CAPABILITY "flashlight_capability"
-#define FLASHLIGHT_SYSFS_FAULT      "flashlight_fault"
-#define FLASHLIGHT_SYSFS_SW_DISABLE "flashlight_sw_disable"
-
-/* scenario */
-#define FLASHLIGHT_SCENARIO_CAMERA_MASK 1
-#define FLASHLIGHT_SCENARIO_DECOUPLE_MASK 2
-#define FLASHLIGHT_SCENARIO_KEEPSTATE_DECOUPLE_MASK 3
-#define FLASHLIGHT_SCENARIO_FLASHLIGHT (0 << 0)
-#define FLASHLIGHT_SCENARIO_CAMERA     (1 << 0)
-#define FLASHLIGHT_SCENARIO_COUPLE     (0 << 1)
-#define FLASHLIGHT_SCENARIO_DECOUPLE   (1 << 1)
-#define FLASHLIGHT_SCENARIO_KEEPSTATE_COUPLE     (0 << 2)
-#define FLASHLIGHT_SCENARIO_KEEPSTATE_DECOUPLE   (1 << 2)
-/* charger status */
-#define FLASHLIGHT_CHARGER_NOT_READY 0
-#define FLASHLIGHT_CHARGER_READY     1
-
-/* sw disable status*/
-#define FLASHLIGHT_SW_DISABLE_ON	1
-#define FLASHLIGHT_SW_DISABLE_OFF	0
-
-/* max duty number */
-#define FLASHLIGHT_MAX_DUTY_NUM 40
+#include <linux/types.h>
 
 /* flashlight arguments */
-#define FLASHLIGHT_TYPE_MAX 2
-#define FLASHLIGHT_CT_MAX 3
-#define FLASHLIGHT_PART_MAX 2
 struct flashlight_user_arg {
 	int type_id;
 	int ct_id;
@@ -108,5 +76,4 @@ struct flashlight_user_arg {
 #define FLASH_IOC_GET_HW_FAULT             _IOR(FLASHLIGHT_MAGIC, 250, int)
 #define FLASH_IOC_GET_HW_FAULT2            _IOR(FLASHLIGHT_MAGIC, 251, int)
 
-#endif /* _FLASHLIGHT_H */
-
+#endif /* _UAPI_MISC_MEDIATEK_FLASHLIGHT_H */

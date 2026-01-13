@@ -138,6 +138,8 @@ static int mt6360_en_ch1;
 static int mt6360_en_ch2;
 static int mt6360_level_ch1;
 static int mt6360_level_ch2;
+static int mt6360_torch_level_ch1 = 6;
+static int mt6360_torch_level_ch2 = 6;
 static unsigned char g_flashlight_brightness;
 
 static int mt6360_is_charger_ready(void)
@@ -299,6 +301,8 @@ static int mt6360_set_level_ch1(int level)
 {
 	level = mt6360_verify_level(level);
 	mt6360_level_ch1 = level;
+	if (!mt6360_is_torch(level))
+		mt6360_torch_level_ch1 = level;
 
 	if (!flashlight_dev_ch1) {
 		pr_info("Failed to set ht level since no flashlight device.\n");
@@ -319,6 +323,8 @@ static int mt6360_set_level_ch2(int level)
 {
 	level = mt6360_verify_level(level);
 	mt6360_level_ch2 = level;
+	if (!mt6360_is_torch(level))
+		mt6360_torch_level_ch2 = level;
 
 	if (!flashlight_dev_ch2) {
 		pr_info("Failed to set lt level since no flashlight device.\n");
@@ -622,6 +628,14 @@ static int mt6360_ioctl(unsigned int cmd, unsigned long arg)
 		fl_arg->arg = MT6360_LEVEL_TORCH - 1;
 		break;
 
+	case FLASH_IOC_GET_CURRENT_TORCH_DUTY:
+		pr_debug("FLASH_IOC_GET_CURRENT_TORCH_DUTY(%d)\n", channel);
+		if (channel == MT6360_CHANNEL_CH1)
+			fl_arg->arg = mt6360_torch_level_ch1;
+		else
+			fl_arg->arg = mt6360_torch_level_ch2;
+		break;
+
 	case FLASH_IOC_GET_DUTY_CURRENT:
 		fl_arg->arg = mt6360_verify_level(fl_arg->arg);
 		pr_debug("FLASH_IOC_GET_DUTY_CURRENT(%d): %d\n",
@@ -632,6 +646,26 @@ static int mt6360_ioctl(unsigned int cmd, unsigned long arg)
 	case FLASH_IOC_GET_HW_TIMEOUT:
 		pr_debug("FLASH_IOC_GET_HW_TIMEOUT(%d)\n", channel);
 		fl_arg->arg = MT6360_HW_TIMEOUT;
+		break;
+
+	case FLASH_IOC_GET_PRE_ON_TIME_MS:
+		pr_debug("FLASH_IOC_GET_PRE_ON_TIME_MS(%d)\n", channel);
+		fl_arg->arg = 0;
+		break;
+
+	case FLASH_IOC_GET_PRE_ON_TIME_MS_DUTY:
+		pr_debug("FLASH_IOC_GET_PRE_ON_TIME_MS_DUTY(%d)\n", channel);
+		fl_arg->arg = 0;
+		break;
+
+	case FLASH_IOC_GET_HW_FAULT:
+		pr_debug("FLASH_IOC_GET_HW_FAULT(%d)\n", channel);
+		fl_arg->arg = 0;
+		break;
+
+	case FLASH_IOC_GET_HW_FAULT2:
+		pr_debug("FLASH_IOC_GET_HW_FAULT2(%d)\n", channel);
+		fl_arg->arg = 0;
 		break;
 
 	default:
@@ -863,24 +897,51 @@ static void mt6360_flash_brightness_set(struct led_classdev *led_cdev,
 static void mt6360_torch_brightness_set(struct led_classdev *led_cdev,
 		enum led_brightness value)
 {
-	struct flashlight_arg arg;
-	memset(&arg, 0, sizeof(struct flashlight_arg));
-	arg.channel = 0;
-	arg.level = value;
-	//torch mode
-	if (0 == strcmp(led_cdev->name, "torch-light0")) {
-		arg.level = value;
-	} else if (0 == strcmp(led_cdev->name, "torch-light1")) {
-		arg.channel = MT6360_CHANNEL_CH2;
-		arg.level = value;
+	int channel = MT6360_CHANNEL_CH1;
+	int channel_tmp = MT6360_CHANNEL_CH2;
+	int level;
+
+	/* torch mode */
+	if (0 == strcmp(led_cdev->name, "torch-light1")) {
+		channel = MT6360_CHANNEL_CH2;
+		channel_tmp = MT6360_CHANNEL_CH1;
 	}
-	if (arg.channel == MT6360_CHANNEL_CH1) {
-		flashlight_set_torch_brightness (
-		flashlight_dev_ch1, mt6360_torch_level[arg.level]);
-	} else if (arg.channel == MT6360_CHANNEL_CH2) {
-		flashlight_set_torch_brightness (
-		flashlight_dev_ch2, mt6360_torch_level[arg.level]);
+
+	level = mt6360_verify_level((int)value);
+	if (level >= MT6360_LEVEL_TORCH)
+		level = MT6360_LEVEL_TORCH - 1;
+
+	if (value <= 0) {
+		/* Turn off without clobbering the last non-zero strength. */
+		if (g_flashlight_brightness) {
+			mt6360_set_scenario(
+					FLASHLIGHT_SCENARIO_FLASHLIGHT |
+					FLASHLIGHT_SCENARIO_COUPLE);
+			mt6360_operate(channel, MT6360_DISABLE);
+			mt6360_operate(channel_tmp, MT6360_DISABLE);
+			mt6360_set_driver(0);
+		}
+		return;
 	}
+
+	/* Save last requested torch strength for reporting (even when off). */
+	if (channel == MT6360_CHANNEL_CH1)
+		mt6360_torch_level_ch1 = level;
+	else
+		mt6360_torch_level_ch2 = level;
+
+	/* Only acquire the driver on the transition from off->on. */
+	if (!g_flashlight_brightness)
+		mt6360_set_driver(1);
+
+	mt6360_set_scenario(
+			FLASHLIGHT_SCENARIO_FLASHLIGHT |
+			FLASHLIGHT_SCENARIO_COUPLE);
+	mt6360_set_level(channel, level);
+	mt6360_timeout_ms[channel] = 0;
+	mt6360_operate(channel, MT6360_ENABLE);
+	mt6360_operate(channel_tmp, MT6360_DISABLE);
+	msleep(10);
 	return;
 }
 static void mt6360_torch2_brightness_set(struct led_classdev *led_cdev,
@@ -904,7 +965,11 @@ static enum led_brightness mtk_pmic_flashlight_brightness_get(struct led_classde
 }
 static enum led_brightness mt6360_torch_brightness_get(struct led_classdev *led_cdev)
 {
-	return g_flashlight_brightness;
+	if (!g_flashlight_brightness)
+		return 0;
+	if (0 == strcmp(led_cdev->name, "torch-light1"))
+		return (enum led_brightness)mt6360_torch_level_ch2;
+	return (enum led_brightness)mt6360_torch_level_ch1;
 }
 static struct led_classdev mtk_flash_led[MT6360_CHANNEL_NUM + 1] = {
 	{
