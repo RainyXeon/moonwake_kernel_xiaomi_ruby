@@ -95,20 +95,6 @@ struct st_susfs_sus_kstat_hlist {
 };
 #endif
 
-/* try_umount */
-#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
-struct st_susfs_try_umount {
-	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
-	int                                     mnt_mode;
-	int                                     err;
-};
-
-struct st_susfs_try_umount_list {
-	struct list_head                        list;
-	struct st_susfs_try_umount              info;
-};
-#endif
-
 /* spoof_uname */
 #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
 struct st_susfs_uname {
