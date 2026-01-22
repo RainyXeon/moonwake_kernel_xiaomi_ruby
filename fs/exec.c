@@ -1734,6 +1734,7 @@ static int exec_binprm(struct linux_binprm *bprm)
  */
 #ifdef CONFIG_KSU_SUSFS
 extern bool ksu_execveat_hook __read_mostly;
+extern bool susfs_is_boot_completed_triggered __read_mostly;
 extern bool __ksu_is_allow_uid_for_current(uid_t uid);
 extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
 			void *envp, int *flags);
@@ -1758,7 +1759,7 @@ static int __do_execve_file(int fd, struct filename *filename,
 		goto orig_flow;
 	}
 
-	if (unlikely(ksu_execveat_hook)) {
+	if (unlikely(ksu_execveat_hook) || !susfs_is_boot_completed_triggered) {
 		ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
 	} else if ((__ksu_is_allow_uid_for_current(current_uid().val))) {
 		ksu_handle_execveat_sucompat(&fd, &filename, &argv, &envp, &flags);
