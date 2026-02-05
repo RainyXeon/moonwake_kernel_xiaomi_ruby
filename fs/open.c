@@ -1215,6 +1215,55 @@ SYSCALL_DEFINE1(close, unsigned int, fd)
 }
 
 /*
+ * Basic close_range implementation to satisfy syscall wiring backport.
+ * Supports flags=0 (close fds) and CLOSE_RANGE_CLOEXEC (0x1) by setting
+ * close-on-exec on the range. Other flags are rejected.
+ */
+SYSCALL_DEFINE3(close_range, unsigned int, fd, unsigned int, max_fd,
+		unsigned int, flags)
+{
+	struct files_struct *files = current->files;
+	struct fdtable *fdt;
+	unsigned int end;
+	unsigned int max_fds;
+	unsigned int i;
+	int retval = 0;
+
+	/* Only support CLOSE_RANGE_CLOEXEC (0x1) for now. */
+	if (flags & ~0x1)
+		return -EINVAL;
+
+	if (max_fd != ~0U && fd > max_fd)
+		return -EINVAL;
+
+	rcu_read_lock();
+	fdt = files_fdtable(files);
+	max_fds = fdt->max_fds;
+	end = (max_fd == ~0U) ? (max_fds ? max_fds - 1 : 0) : max_fd;
+	/* Clamp to current table size to avoid walking beyond */
+	if (end >= max_fds && max_fds)
+		end = max_fds - 1;
+	rcu_read_unlock();
+
+	if (fd >= max_fds)
+		return 0;
+
+	if (flags & 0x1) {
+		for (i = fd; i <= end; i++)
+			set_close_on_exec(i, 1);
+		return 0;
+	}
+
+	for (i = fd; i <= end; i++) {
+		int err = __close_fd(files, i);
+		if (err && err != -EBADF)
+			retval = err;
+	}
+
+	return retval;
+}
+
+/*
  * This routine simulates a hangup on the tty, to arrange that users
  * are given clean terminals at login time.
  */
