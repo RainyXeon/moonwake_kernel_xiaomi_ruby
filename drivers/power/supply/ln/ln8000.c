@@ -2129,6 +2129,8 @@ static int ln8000_probe(struct i2c_client *client, const struct i2c_device_id *i
 		return -ENOMEM;
 	}
 	info->dev = &client->dev;
+	pr_info("STEP1 dev=%px\n", info->dev);
+
 	info->client = client;
 	ret = ln8000_parse_dt(info);
 	if (IS_ERR_VALUE((unsigned long)ret)) {
@@ -2154,17 +2156,22 @@ static int ln8000_probe(struct i2c_client *client, const struct i2c_device_id *i
 	i2c_set_clientdata(client, info);
 
 	ln8000_soft_reset(info);
+	pr_info("STEP2 dev=%px\n", info->dev);
+
 	ln8000_init_device(info);
+	pr_info("STEP3 dev=%px\n", info->dev);
 
 	ret = ln8000_psy_register(info);
 	if (ret) {
 		goto err_cleanup;
 	}
+	pr_info("STEP4 dev=%px\n", info->dev);
 
 	ret = ln8000_irq_init(info);
 	if (ret < 0) {
 		goto err_psy;
 	}
+	pr_info("STEP5 dev=%px\n", info->dev);
 #if 0
 	if (client->irq) {
 		ret = devm_request_threaded_irq(&client->dev, client->irq,
@@ -2213,10 +2220,12 @@ err_psy:
 	power_supply_unregister(info->psy_chg);
 
 err_cleanup:
-	i2c_set_clientdata(client, NULL);
-	mutex_destroy(&info->data_lock);
-	mutex_destroy(&info->i2c_lock);
-	mutex_destroy(&info->irq_lock);
+  i2c_set_clientdata(client, NULL);
+  mutex_destroy(&info->data_lock);
+  mutex_destroy(&info->i2c_lock);
+  mutex_destroy(&info->irq_lock);
+  return ret;
+
 err_devmem:
 	kfree(info->pdata);
 	kfree(info);
