@@ -155,19 +155,22 @@ static int ln8000_check_work_mode(struct ln8000_info *info, int driver_data)
 static int ln8000_read_reg(struct ln8000_info *info, u8 addr, void *data)
 {
 	int i, ret = 0;
+	unsigned int val;
 
 	mutex_lock(&info->i2c_lock);
 	for (i = 0; i < I2C_RETRY_CNT; ++i) {
-		ret = regmap_read(info->regmap, addr, data);
+		ret = regmap_read(info->regmap, addr, &val);
 		if (IS_ERR_VALUE((unsigned long)ret)) {
 			ln_info("failed-read, reg(0x%02X), ret(%d)\n", addr, ret);
 		} else {
+			*(u8 *)data = (u8)val; // Copy down 1 byte
 			break;
 		}
 	}
 	mutex_unlock(&info->i2c_lock);
 	return ret;
 }
+
 
 static int ln8000_bulk_read_reg(struct ln8000_info *info, u8 addr, void *data, int count)
 {
@@ -1430,6 +1433,7 @@ static int ln8000_irq_init(struct ln8000_info *info)
 		/* grab IRQ from primary device */
 		ln_info("mapped shared GPIO to (primary dev) irq (%d)\n", info->client->irq);
 	}
+
 	/* interrupt mask setting */
 	mask = LN8000_MASK_ADC_DONE_INT | LN8000_MASK_TIMER_INT | LN8000_MASK_MODE_INT | LN8000_MASK_REV_CURR_INT;
 	if (info->pdata->tdie_prot_disable && info->pdata->tdie_reg_disable)
@@ -1439,6 +1443,7 @@ static int ln8000_irq_init(struct ln8000_info *info)
 	if (info->pdata->tbat_mon_disable && info->pdata->tbus_mon_disable)
 		mask |= LN8000_MASK_NTC_PROT_INT;
 	ln8000_write_reg(info, LN8000_REG_INT1_MSK, mask);
+
 	/* read clear int_reg */
 	ret = ln8000_read_int_value(info, &int_reg);
 	if (IS_ERR_VALUE((unsigned long)ret)) {
@@ -2129,6 +2134,8 @@ static int ln8000_probe(struct i2c_client *client, const struct i2c_device_id *i
 		return -ENOMEM;
 	}
 	info->dev = &client->dev;
+	pr_info("STEP1 dev=%px\n", info->dev);
+
 	info->client = client;
 	ret = ln8000_parse_dt(info);
 	if (IS_ERR_VALUE((unsigned long)ret)) {
@@ -2154,17 +2161,22 @@ static int ln8000_probe(struct i2c_client *client, const struct i2c_device_id *i
 	i2c_set_clientdata(client, info);
 
 	ln8000_soft_reset(info);
+	pr_info("STEP2 dev=%px\n", info->dev);
+
 	ln8000_init_device(info);
+	pr_info("STEP3 dev=%px\n", info->dev);
 
 	ret = ln8000_psy_register(info);
 	if (ret) {
 		goto err_cleanup;
 	}
+	pr_info("STEP4 dev=%px\n", info->dev);
 
 	ret = ln8000_irq_init(info);
 	if (ret < 0) {
 		goto err_psy;
 	}
+	pr_info("STEP5 dev=%px\n", info->dev);
 #if 0
 	if (client->irq) {
 		ret = devm_request_threaded_irq(&client->dev, client->irq,
@@ -2213,10 +2225,12 @@ err_psy:
 	power_supply_unregister(info->psy_chg);
 
 err_cleanup:
-	i2c_set_clientdata(client, NULL);
-	mutex_destroy(&info->data_lock);
-	mutex_destroy(&info->i2c_lock);
-	mutex_destroy(&info->irq_lock);
+  i2c_set_clientdata(client, NULL);
+  mutex_destroy(&info->data_lock);
+  mutex_destroy(&info->i2c_lock);
+  mutex_destroy(&info->irq_lock);
+  return ret;
+
 err_devmem:
 	kfree(info->pdata);
 	kfree(info);
