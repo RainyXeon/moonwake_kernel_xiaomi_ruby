@@ -1747,6 +1747,7 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
 			}
 		}
 #endif
+		up_read(&mm->mmap_sem);
 		start_vaddr = end;
 
 		len = min(count, PM_ENTRY_BYTES * pm.pos);
