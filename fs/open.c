@@ -34,10 +34,13 @@
 
 #include "internal.h"
 #include <trace/hooks/syscall_check.h>
+<<<<<<< HEAD
 
 #ifdef CONFIG_KSU_SUSFS
 #include <linux/susfs_def.h>
 #endif
+=======
+>>>>>>> lab/lineage-23.2
 
 int do_truncate2(struct vfsmount *mnt, struct dentry *dentry, loff_t length,
 		unsigned int time_attrs, struct file *filp)
