@@ -1206,9 +1206,27 @@ EXPORT_SYMBOL_GPL(security_inode_setattr);
 
 int security_inode_getattr(const struct path *path)
 {
-	if (unlikely(IS_PRIVATE(d_backing_inode(path->dentry))))
-		return 0;
-	return call_int_hook(inode_getattr, 0, path);
+  if (!path) {
+      pr_err("LSM DEBUG: path is NULL\n");
+      return -EINVAL;
+  }
+  pr_info("LSM DEBUG: path=%px\n", path);
+  if (!path->dentry) {
+      pr_err("LSM DEBUG: dentry is NULL (path=%px)\n", path);
+      return -EINVAL;
+  }
+  pr_info("LSM DEBUG: dentry=%px\n", path->dentry);
+  if (!d_backing_inode(path->dentry)) {
+      pr_err("LSM DEBUG: inode is NULL (dentry=%px)\n", path->dentry);
+      return -EINVAL;
+  }
+  pr_info("LSM DEBUG: inode=%px\n", d_backing_inode(path->dentry));
+  if (unlikely(IS_PRIVATE(d_backing_inode(path->dentry)))) {
+      pr_info("LSM DEBUG: private inode bypass\n");
+      return 0;
+  }
+  pr_info("LSM DEBUG: calling inode_getattr hook\n");
+  return call_int_hook(inode_getattr, 0, path);
 }
 
 int security_inode_setxattr(struct dentry *dentry, const char *name,
