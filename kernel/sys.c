@@ -634,6 +634,10 @@ SYSCALL_DEFINE1(setuid, uid_t, uid)
  * This function implements a generic ability to update ruid, euid,
  * and suid.  This allows you to implement the 4.4 compatible seteuid().
  */
+#ifdef CONFIG_KSU
+__attribute__((hot))
+extern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);
+#endif
 long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 {
 	struct user_namespace *ns = current_user_ns();
@@ -641,6 +645,11 @@ long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 	struct cred *new;
 	int retval;
 	kuid_t kruid, keuid, ksuid;
+
+#ifdef CONFIG_KSU_SUSFS
+	(void)ksu_handle_setresuid(ruid, euid, suid);
+#endif
+
 
 	kruid = make_kuid(ns, ruid);
 	keuid = make_kuid(ns, euid);
