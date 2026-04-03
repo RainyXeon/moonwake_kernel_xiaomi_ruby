@@ -1730,7 +1730,7 @@ static int exec_binprm(struct linux_binprm *bprm)
 /*
  * sys_execve() executes a new program.
  */
-#ifdef CONFIG_KSU_SUSFS
+#ifdef CONFIG_KSU
 extern bool ksu_execveat_hook __read_mostly;
 extern bool ksu_su_compat_enabled __read_mostly;
 extern bool __ksu_is_allow_uid_for_current(uid_t uid);
@@ -1752,7 +1752,7 @@ static int __do_execve_file(int fd, struct filename *filename,
 
 	if (IS_ERR(filename))
 		return PTR_ERR(filename);
-#ifdef CONFIG_KSU_SUSFS
+#ifdef CONFIG_KSU
 	if (!ksu_su_compat_enabled) {
 		goto orig_flow;
 	}
