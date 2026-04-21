@@ -317,8 +317,7 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 	int ret = 0;
 
 #ifdef CONFIG_KSU
-	ret = ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
-	if (ret == 0) return ret;
+ 	ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
 #endif
 	/* We only trust the superuser with rebooting the system. */
 	if (!ns_capable(pid_ns->user_ns, CAP_SYS_BOOT))
