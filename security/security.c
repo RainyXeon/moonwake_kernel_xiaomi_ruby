@@ -1206,9 +1206,19 @@ EXPORT_SYMBOL_GPL(security_inode_setattr);
 
 int security_inode_getattr(const struct path *path)
 {
-	if (unlikely(IS_PRIVATE(d_backing_inode(path->dentry))))
-		return 0;
-	return call_int_hook(inode_getattr, 0, path);
+  if (!path) {
+    return -EINVAL;
+  }
+  if (!path->dentry) {
+    return -EINVAL;
+  }
+  if (!d_backing_inode(path->dentry)) {
+    return -EINVAL;
+  }
+  if (unlikely(IS_PRIVATE(d_backing_inode(path->dentry)))) {
+    return 0;
+  }
+  return call_int_hook(inode_getattr, 0, path);
 }
 
 int security_inode_setxattr(struct dentry *dentry, const char *name,

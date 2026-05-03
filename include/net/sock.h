@@ -513,17 +513,18 @@ struct sock {
 #else
 	ANDROID_KABI_USE(1, spinlock_t sk_peer_lock);
 #endif
+
+#if IS_ENABLED(CONFIG_PROVE_LOCKING) && IS_ENABLED(CONFIG_MODULES)
+	ANDROID_KABI_USE(2, struct module *sk_owner);
+#else
 	ANDROID_KABI_RESERVE(2);
+#endif
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);
 	ANDROID_KABI_RESERVE(5);
 	ANDROID_KABI_RESERVE(6);
 	ANDROID_KABI_RESERVE(7);
 	ANDROID_KABI_RESERVE(8);
-
-#if IS_ENABLED(CONFIG_PROVE_LOCKING) && IS_ENABLED(CONFIG_MODULES)
-	struct module		*sk_owner;
-#endif
 };
 
 enum sk_pacing {
@@ -736,6 +737,19 @@ static inline bool sk_nulls_del_node_init_rcu(struct sock *sk)
 		__sock_put(sk);
 	}
 	return rc;
+}
+
+static inline bool sk_nulls_replace_node_init_rcu(struct sock *old,
+						  struct sock *new)
+{
+	if (sk_hashed(old)) {
+		hlist_nulls_replace_init_rcu(&old->sk_nulls_node,
+					     &new->sk_nulls_node);
+		__sock_put(old);
+		return true;
+	}
+
+	return false;
 }
 
 static inline void __sk_add_node(struct sock *sk, struct hlist_head *list)
