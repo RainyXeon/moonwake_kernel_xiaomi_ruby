@@ -1374,7 +1374,7 @@ static void delayed_mntput(struct work_struct *unused)
 }
 static DECLARE_DELAYED_WORK(delayed_mntput_work, delayed_mntput);
 
-static void mntput_no_expire(struct mount *mnt)
+void mntput_no_expire(struct mount *mnt)
 {
 	rcu_read_lock();
 	if (likely(READ_ONCE(mnt->mnt_ns))) {
@@ -1724,7 +1724,7 @@ static void umount_tree(struct mount *mnt, enum umount_tree_flags how)
 
 static void shrink_submounts(struct mount *mnt);
 
-static int do_umount_root(struct super_block *sb)
+int do_umount_root(struct super_block *sb)
 {
 	int ret = 0;
 
@@ -1747,7 +1747,7 @@ static int do_umount_root(struct super_block *sb)
 	return ret;
 }
 
-static int do_umount(struct mount *mnt, int flags)
+int do_umount(struct mount *mnt, int flags)
 {
 	struct super_block *sb = mnt->mnt.mnt_sb;
 	int retval;
@@ -1883,7 +1883,7 @@ out_unlock:
 /*
  * Is the caller allowed to modify his namespace?
  */
-static inline bool may_mount(void)
+inline bool may_mount(void)
 {
 	return ns_capable(current->nsproxy->mnt_ns->user_ns, CAP_SYS_ADMIN);
 }
@@ -1905,7 +1905,7 @@ static inline bool may_mandlock(void)
 }
 #endif
 
-static int can_umount(const struct path *path, int flags)
+int can_umount(const struct path *path, int flags)
 {
 	struct mount *mnt = real_mount(path->mnt);
 
