@@ -290,4 +290,6 @@ int lcm_fps_ctx_update(unsigned long long cur_ns,
 		unsigned int crtc_id, unsigned int mode);
 int mtk_mipi_clk_change(struct drm_crtc *crtc, unsigned int data_rate);
 void disp_drm_debug(const char *opt);
+int mtk_drm_ioctl_kick_idle(struct drm_device *dev, void *data,
+        struct drm_file *file_priv);
 #endif /* MTK_DRM_DRV_H */
