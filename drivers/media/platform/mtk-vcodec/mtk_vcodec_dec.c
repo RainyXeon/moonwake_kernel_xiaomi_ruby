@@ -1600,13 +1600,13 @@ static int vidioc_vdec_s_fmt(struct file *file, void *priv,
 	if ((f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) &&
 		vb2_is_busy(&ctx->m2m_ctx->out_q_ctx.q)) {
 		mtk_v4l2_err("out_q_ctx buffers already requested");
-		ret = -EBUSY;
+		return -EBUSY;
 	}
 
 	if ((f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) &&
 		vb2_is_busy(&ctx->m2m_ctx->cap_q_ctx.q)) {
 		mtk_v4l2_err("cap_q_ctx buffers already requested");
-		ret = -EBUSY;
+		return -EBUSY;
 	}
 
 	fmt = mtk_vdec_find_format(ctx, f,

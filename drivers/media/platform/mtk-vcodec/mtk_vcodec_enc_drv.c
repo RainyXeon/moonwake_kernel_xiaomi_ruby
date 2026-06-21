@@ -413,7 +413,6 @@ static const struct of_device_id mtk_vcodec_enc_match[] = {
 	{.compatible = "mediatek,mt6781-vcodec-enc",},
 	{.compatible = "mediatek,mt6768-vcodec-enc",},
 	{.compatible = "mediatek,mt6785-vcodec-enc",},
-	{.compatible = "mediatek,venc_gcon",},
 	{},
 };
 MODULE_DEVICE_TABLE(of, mtk_vcodec_enc_match);
