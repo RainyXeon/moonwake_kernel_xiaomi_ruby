@@ -296,11 +296,8 @@ static int crypto_authenc_esn_decrypt(struct aead_request *req)
 
 	cryptlen -= authsize;
 
-	if (req->src != dst) {
-		err = crypto_authenc_esn_copy(req, assoclen + cryptlen);
-		if (err)
-			return err;
-	}
+	if (req->src != dst)
+		memcpy_sglist(dst, req->src, assoclen + cryptlen);
 
 	scatterwalk_map_and_copy(ihash, req->src, assoclen + cryptlen,
 				 authsize, 0);
