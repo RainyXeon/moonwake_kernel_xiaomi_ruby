@@ -233,7 +233,7 @@ static void __sbi_store_value(struct f2fs_attr *a,
 		break;
 	default:
 		f2fs_bug_on(sbi, 1);
-		f2fs_msg(sbi->sb, KERN_ERR, "store sysfs node value with wrong type");
+		f2fs_printk(sbi, KERN_ERR, "store sysfs node value with wrong type");
 	}
 }
 
@@ -535,17 +535,11 @@ F2FS_GENERAL_RO_ATTR(free_segments);
 F2FS_GENERAL_RO_ATTR(lifetime_write_kbytes);
 F2FS_GENERAL_RO_ATTR(features);
 F2FS_GENERAL_RO_ATTR(current_reserved_blocks);
-F2FS_GENERAL_RO_ATTR(unusable);
-F2FS_GENERAL_RO_ATTR(encoding);
-F2FS_GENERAL_RO_ATTR(mounted_time_sec);
 #ifdef CONFIG_F2FS_STAT_FS
 F2FS_STAT_ATTR(STAT_INFO, f2fs_stat_info, cp_foreground_calls, cp_count);
 F2FS_STAT_ATTR(STAT_INFO, f2fs_stat_info, cp_background_calls, bg_cp_count);
 F2FS_STAT_ATTR(STAT_INFO, f2fs_stat_info, gc_foreground_calls, call_count);
 F2FS_STAT_ATTR(STAT_INFO, f2fs_stat_info, gc_background_calls, bg_gc);
-F2FS_GENERAL_RO_ATTR(moved_blocks_background);
-F2FS_GENERAL_RO_ATTR(moved_blocks_foreground);
-F2FS_GENERAL_RO_ATTR(avg_vblocks);
 #endif
 
 #ifdef CONFIG_FS_ENCRYPTION
@@ -618,21 +612,15 @@ static struct attribute *f2fs_attrs[] = {
 	ATTR_LIST(node_io_flag),
 	ATTR_LIST(dirty_segments),
 	ATTR_LIST(free_segments),
-	ATTR_LIST(unusable),
 	ATTR_LIST(lifetime_write_kbytes),
 	ATTR_LIST(features),
 	ATTR_LIST(reserved_blocks),
 	ATTR_LIST(current_reserved_blocks),
-	ATTR_LIST(encoding),
-	ATTR_LIST(mounted_time_sec),
 #ifdef CONFIG_F2FS_STAT_FS
 	ATTR_LIST(cp_foreground_calls),
 	ATTR_LIST(cp_background_calls),
 	ATTR_LIST(gc_foreground_calls),
 	ATTR_LIST(gc_background_calls),
-	ATTR_LIST(moved_blocks_foreground),
-	ATTR_LIST(moved_blocks_background),
-	ATTR_LIST(avg_vblocks),
 #endif
 	NULL,
 };
