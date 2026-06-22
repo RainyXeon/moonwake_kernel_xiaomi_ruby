@@ -10,7 +10,7 @@ ZIPNAME="MoonWake-Private-$(date '+%Y%m%d-%H%M').zip"
 export ARCH=arm64
 export KBUILD_BUILD_USER=rainyxeon
 export KBUILD_BUILD_HOST=private.deepinrain.com
-export PATH="/root/clang-r530567/bin/:$PATH"
+export PATH="/home/rainyxeon/r563880/bin/:$PATH"
 
 if [[ $1 = "-c" || $1 = "--clean" ]]; then
 	rm -rf out
