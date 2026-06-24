@@ -459,6 +459,7 @@ struct DISP_DITHER_PARAM {
 #define DRM_MTK_SUPPORT_COLOR_TRANSFORM    0x2D
 #define DRM_MTK_READ_SW_REG   0x2E
 #define DRM_MTK_WRITE_SW_REG   0x2F
+#define DRM_MTK_KICK_IDLE 0x5b
 
 /* AAL */
 #define DRM_MTK_AAL_INIT_REG	0x30
@@ -810,6 +811,8 @@ struct DRM_DISP_WRITE_REG {
 #define DRM_IOCTL_MTK_DEBUG_LOG     DRM_IOWR(DRM_COMMAND_BASE + \
 			DRM_MTK_DEBUG_LOG, int)
 
+#define DRM_IOCTL_MTK_KICK_IDLE     DRM_IOWR(DRM_COMMAND_BASE + \
+		DRM_MTK_KICK_IDLE, unsigned int)
 
 /* AAL IOCTL */
 #define AAL_HIST_BIN            33	/* [0..32] */

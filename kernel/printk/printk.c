@@ -1005,10 +1005,15 @@ static ssize_t devkmsg_write(struct kiocb *iocb, struct iov_iter *from)
 			endp++;
 			len -= endp - line;
 			line = endp;
+			/* Only allow init: messages in the dmesg */
+			if (strncmp(line, "init:", strlen("init:")))
+				goto free;			
 		}
 	}
 
 	printk_emit(facility, level, NULL, 0, "%s", line);
+
+free:
 	kfree(buf);
 	return ret;
 }
@@ -2553,7 +2558,7 @@ void suspend_console(void)
 {
 	if (!console_suspend_enabled)
 		return;
-	pr_info("Suspending console(s) (use no_console_suspend to debug)\n");
+
 	console_lock();
 	console_suspended = 1;
 	up_console_sem();

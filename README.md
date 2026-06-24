@@ -11,7 +11,7 @@ Redmi Note 12 pro 5G (ruby) kernel specify for powersave
 - Enable some twaek for powersave but keep the performance
 - ln8000 fast charge driver enabled
 - Updated wireguard module
-- Use google clang 19 (r530567)
+- Use google clang 21
 
 ## Compile guide
 
@@ -31,5 +31,4 @@ If you don't know how to flash, [read this wiki!](https://github.com/DPR-MoonWak
 ### Option 2: Kernel Player (For advanced user that build android kernel before)
 
 Since you (Kernel Player) know how to build, pack AK3 and flash it, I just have some notes for you
-- Compile it with only google `clang-r530567 (19)`, `clang-r498229b (17.0.4)` or `clang-r487747c (17.0.2)`. Clang 18, 20, 21 or older have some issues with ln8000 driver with make CN and IN variant can't boot
 - To add a feature config (eg: vendor/kernelsu.config), please check `arch/arm64/configs/vendor`, see what config you want to add and then use `make $your_args_here vendor/example.config` after using `make $your_args_here ruby_defconfig`
