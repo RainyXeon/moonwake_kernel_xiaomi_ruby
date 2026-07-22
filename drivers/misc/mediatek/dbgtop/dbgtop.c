@@ -376,7 +376,7 @@ int mtk_dbgtop_dfd_timeout(int value)
 	tmp |= value | MTK_DBGTOP_LATCH_CTL2_KEY;
 	mt_reg_sync_writel(tmp, MTK_DBGTOP_LATCH_CTL2);
 
-	pr_info("%s: MTK_DBGTOP_LATCH_CTL2(0x%x)\n", __func__,
+	pr_debug("%s: MTK_DBGTOP_LATCH_CTL2(0x%x)\n", __func__,
 		readl(IOMEM(MTK_DBGTOP_LATCH_CTL2)));
 
 	return 0;
@@ -436,4 +436,3 @@ EXPORT_SYMBOL(mtk_dbgtop_mfg_pwr_en);
 core_initcall(mtk_dbgtop_get_base_addr);
 module_init(mtk_dbgtop_init);
 module_exit(mtk_dbgtop_exit);
-
