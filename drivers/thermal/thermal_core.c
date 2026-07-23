@@ -36,6 +36,7 @@
 #include "../misc/mediatek/base/power/include/ppm_v3/mtk_ppm_api.h"
 
 #include <linux/power_supply.h>
+#include <linux/workqueue.h>
 #ifdef CONFIG_RUBY_MI_THERMAL_CHG
 #include <linux/hwid.h>
 #endif
@@ -66,7 +67,9 @@ struct screen_monitor sm;
 
 struct usb_monitor  {
 	struct notifier_block psy_nb;
+	struct work_struct update_work;
 	int usb_online;
+	bool notifier_registered;
 };
 static struct usb_monitor usb_state;
 
@@ -1352,7 +1355,8 @@ static DEVICE_ATTR(charger_temp, 0664,
 static ssize_t thermal_usb_online_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	return snprintf(buf, PAGE_SIZE, "%d\n", usb_state.usb_online);
+	return snprintf(buf, PAGE_SIZE, "%d\n",
+			READ_ONCE(usb_state.usb_online));
 }
 static DEVICE_ATTR(usb_online, 0664,
 			thermal_usb_online_show, NULL);
@@ -1600,27 +1604,44 @@ static int screen_state_for_thermal_callback(struct notifier_block *nb, unsigned
 }
 #endif
 
+static void usb_online_work(struct work_struct *work)
+{
+	struct usb_monitor *monitor = container_of(work, struct usb_monitor,
+			update_work);
+	struct power_supply *usb_psy;
+	union power_supply_propval online = { 0 };
+	int err;
+
+	usb_psy = power_supply_get_by_name("usb");
+	if (!usb_psy)
+		return;
+
+	err = power_supply_get_property(usb_psy,
+					POWER_SUPPLY_PROP_ONLINE, &online);
+	power_supply_put(usb_psy);
+	if (err) {
+		pr_err_ratelimited("usb online read error: %d\n", err);
+		return;
+	}
+
+	WRITE_ONCE(monitor->usb_online, online.intval);
+	if (device_is_registered(&thermal_message_dev))
+		sysfs_notify(&thermal_message_dev.kobj, NULL, "usb_online");
+}
+
 static int usb_online_callback(struct notifier_block *nb,
 		unsigned long val, void *data)
 {
-	static struct power_supply *usb_psy;
+	struct usb_monitor *monitor = container_of(nb, struct usb_monitor,
+			psy_nb);
 	struct power_supply *psy = data;
-	union power_supply_propval ret = {0,};
-	int err = 0;
-	if (strcmp(psy->desc->name, "usb"))
-		return NOTIFY_OK;
-	if (!usb_psy)
-		usb_psy = power_supply_get_by_name("usb");
-	if (usb_psy) {
-		err = power_supply_get_property(usb_psy,
-				POWER_SUPPLY_PROP_ONLINE, &ret);
-		if (err) {
-			pr_err("usb online read error:%d\n",err);
-			return err;
-		}
-		usb_state.usb_online = ret.intval;
-		sysfs_notify(&thermal_message_dev.kobj, NULL, "usb_online");
-	}
+
+	if (val != PSY_EVENT_PROP_CHANGED || !psy || !psy->desc ||
+	    !psy->desc->name || strcmp(psy->desc->name, "usb"))
+		return NOTIFY_DONE;
+
+	schedule_work(&monitor->update_work);
+
 	return NOTIFY_OK;
 }
 
@@ -2058,6 +2079,7 @@ static int __init thermal_init(void)
 	int result;
 	int ret = 0;
 
+	INIT_WORK(&usb_state.update_work, usb_online_work);
 	mutex_init(&poweroff_lock);
 	result = thermal_register_governors();
 	if (result)
@@ -2072,14 +2094,6 @@ static int __init thermal_init(void)
 		pr_warn("Thermal: register screen state callback failed\n");
 	}
 #endif
-
-	usb_state.psy_nb.notifier_call=usb_online_callback;
-	ret = power_supply_reg_notifier(&usb_state.psy_nb);
-	if (ret < 0) {
-		pr_err("usb online notifier registration error. defer. err:%d\n",
-			ret);
-		ret = -EPROBE_DEFER;
-	}
 
 	result = of_parse_thermal_message();
 	if (result)
@@ -2102,11 +2116,27 @@ static int __init thermal_init(void)
 		pr_warn("Thermal: Can not register suspend notifier, return %d\n",
 			result);
 
+	if (device_is_registered(&thermal_message_dev)) {
+		usb_state.psy_nb.notifier_call = usb_online_callback;
+		ret = power_supply_reg_notifier(&usb_state.psy_nb);
+		if (ret < 0) {
+			pr_err("usb online notifier registration error: %d\n", ret);
+		} else {
+			usb_state.notifier_registered = true;
+			schedule_work(&usb_state.update_work);
+		}
+	}
+
 	return 0;
 
 exit_netlink:
 	genetlink_exit();
 unregister_class:
+#ifdef CONFIG_FB
+	fb_unregister_client(&sm.thermal_notifier);
+#endif
+	if (device_is_registered(&thermal_message_dev))
+		destroy_thermal_message_node();
 	class_unregister(&thermal_class);
 unregister_governors:
 	thermal_unregister_governors();
@@ -2121,15 +2151,21 @@ error:
 
 static void __exit thermal_exit(void)
 {
+	if (usb_state.notifier_registered) {
+		power_supply_unreg_notifier(&usb_state.psy_nb);
+		usb_state.notifier_registered = false;
+	}
+	cancel_work_sync(&usb_state.update_work);
+#ifdef CONFIG_FB
+	fb_unregister_client(&sm.thermal_notifier);
+#endif
+	if (device_is_registered(&thermal_message_dev))
+		destroy_thermal_message_node();
 	unregister_pm_notifier(&thermal_pm_nb);
 	of_thermal_destroy_zones();
 	genetlink_exit();
 	class_unregister(&thermal_class);
 	thermal_unregister_governors();
-	destroy_thermal_message_node();
-#ifdef CONFIG_FB
-	fb_unregister_client(&sm.thermal_notifier);
-#endif
 	ida_destroy(&thermal_tz_ida);
 	ida_destroy(&thermal_cdev_ida);
 	mutex_destroy(&thermal_list_lock);
