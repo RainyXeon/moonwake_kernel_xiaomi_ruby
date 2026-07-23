@@ -379,7 +379,7 @@ static void check_full_recharge(struct charger_manager *info)
 	} else
 		iterm = info->iterm;
 
-	chr_err("%s: ffc_enable = %d, diff_fv_val = %d, iterm = %d, iterm_effective = %d, fv_effective = %d, full_count = %d, recharge_count = %d", __func__, info->ffc_enable, info->diff_fv_val, iterm, info->iterm_effective, info->fv_effective, full_count, recharge_count);
+	chr_debug("%s: ffc_enable = %d, diff_fv_val = %d, iterm = %d, iterm_effective = %d, fv_effective = %d, full_count = %d, recharge_count = %d", __func__, info->ffc_enable, info->diff_fv_val, iterm, info->iterm_effective, info->fv_effective, full_count, recharge_count);
 
 	if (info->charge_full) {
 		full_count = 0;
@@ -539,7 +539,7 @@ static void monitor_thermal_limit(struct charger_manager *info)
 			msleep(150);
                 }
 	}
-	chr_err("%s: info->psy_type = %d, thermal_level = %d, ", __func__, info->psy_type, thermal_level);
+	chr_debug("%s: info->psy_type = %d, thermal_level = %d, ", __func__, info->psy_type, thermal_level);
 	switch(info->psy_type) {
 	case POWER_SUPPLY_TYPE_USB_DCP:
 		vote(info->bbc_fcc_votable, THERMAL_VOTER, true, info->thermal_limit[0][thermal_level]);
@@ -682,7 +682,7 @@ static void charge_monitor_func(struct work_struct *work)
 
 	monitor_typec_burn(info);
 
-	chr_err("%s: bat=[%d,%d,%d],step_chg=[%d,%d,%d,%d],sw_cv=[%d,%d],jeita=[%d,%d,%d,%d]",
+	chr_debug("%s: bat=[%d,%d,%d],step_chg=[%d,%d,%d,%d],sw_cv=[%d,%d],jeita=[%d,%d,%d,%d]",
 				__func__, info->vbat,info->ibat,info->tbat,
 				info->step_chg_index[0],info->step_chg_index[1],info->step_chg_fcc,info->step_chg_fv,
 				info->sw_cv,info->sw_cv_count,
