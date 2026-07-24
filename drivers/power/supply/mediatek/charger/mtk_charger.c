@@ -2192,9 +2192,6 @@ static void update_real_type_data(struct charger_manager *info)
 		power_supply_changed(info->usb_psy);
 		chr_err("%s,update real type to %d\n",__func__, real_type_old);
 	}
-
-	charger_dev_dump_registers(info->chg1_dev);
-	charger_dev_dump_registers(info->chg2_dev);
 }
 
 static void check_charge_data(struct charger_manager *info)
