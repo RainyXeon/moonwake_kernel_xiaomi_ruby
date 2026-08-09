@@ -1087,6 +1087,7 @@ int bpf_prog_array_copy(struct bpf_prog_array *old_array,
 
 #define __BPF_PROG_RUN_ARRAY(array, ctx, func, check_non_null, set_cg_storage) \
 	({						\
+		__label__ _out;				\
 		struct bpf_prog_array_item *_item;	\
 		struct bpf_prog *_prog;			\
 		struct bpf_prog_array *_array;		\
@@ -1094,7 +1095,7 @@ int bpf_prog_array_copy(struct bpf_prog_array *old_array,
 		migrate_disable();			\
 		rcu_read_lock();			\
 		_array = rcu_dereference(array);	\
-		if (unlikely(check_non_null && !_array))\
+		if (unlikely(!_array))			\
 			goto _out;			\
 		_item = &_array->items[0];		\
 		while ((_prog = READ_ONCE(_item->prog))) {		\
@@ -1138,6 +1139,7 @@ _out:							\
  */
 #define BPF_PROG_CGROUP_INET_EGRESS_RUN_ARRAY(array, ctx, func)		\
 	({						\
+		__label__ _out;				\
 		struct bpf_prog_array_item *_item;	\
 		struct bpf_prog *_prog;			\
 		struct bpf_prog_array *_array;		\
@@ -1147,6 +1149,8 @@ _out:							\
 		migrate_disable();			\
 		rcu_read_lock();			\
 		_array = rcu_dereference(array);	\
+		if (unlikely(!_array))			\
+			goto _out;			\
 		_item = &_array->items[0];		\
 		while ((_prog = READ_ONCE(_item->prog))) {		\
 			if (unlikely(bpf_cgroup_storage_set(_item->cgroup_storage)))	\
@@ -1157,6 +1161,7 @@ _out:							\
 			_cn |= (ret & 2);		\
 			_item++;			\
 		}					\
+_out:							\
 		rcu_read_unlock();			\
 		migrate_enable();			\
 		if (_ret)				\
