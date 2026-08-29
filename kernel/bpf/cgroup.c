@@ -1040,7 +1040,7 @@ int __cgroup_bpf_run_filter_skb(struct sock *sk,
 				struct sk_buff *skb,
 				enum bpf_attach_type type)
 {
-	unsigned int offset = skb->data - skb_network_header(skb);
+	unsigned int offset;
 	struct sock *save_sk;
 	void *saved_data_end;
 	struct cgroup *cgrp;
@@ -1053,8 +1053,15 @@ int __cgroup_bpf_run_filter_skb(struct sock *sk,
 		return 0;
 
 	cgrp = sock_cgroup_ptr(&sk->sk_cgrp_data);
-	if (!cgrp)
+
+	if (!cgrp || !rcu_access_pointer(cgrp->bpf.effective[type]))
 		return 0;
+
+	if (!skb_network_header_was_set(skb))
+		return 0;
+
+	offset = skb->data - skb_network_header(skb);
+
 	save_sk = skb->sk;
 	skb->sk = sk;
 	__skb_push(skb, offset);

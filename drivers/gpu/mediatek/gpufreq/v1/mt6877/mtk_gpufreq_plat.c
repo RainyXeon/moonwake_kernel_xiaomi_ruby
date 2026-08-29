@@ -2841,10 +2841,10 @@ static void __mt_gpufreq_set(
 	gpufreq_pr_logbuf(
 		"end idx: %d -> %d, clk: %d, freq: %d, vgpu: %d, vsram_gpu: %d\n",
 		idx_old, idx_new,
-		mt_get_subsys_freq(FM_MFGPLL1),
-		__mt_gpufreq_get_cur_freq(),
-		__mt_gpufreq_get_cur_vgpu(),
-		__mt_gpufreq_get_cur_vsram_gpu());
+		g_cur_opp_freq,
+		g_cur_opp_freq,
+		g_cur_opp_vgpu,
+		g_cur_opp_vsram_gpu);
 
 	__mt_gpufreq_kick_pbm(1);
 }

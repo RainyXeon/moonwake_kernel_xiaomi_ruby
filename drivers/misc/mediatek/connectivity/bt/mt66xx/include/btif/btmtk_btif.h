@@ -12,6 +12,7 @@
 #include <linux/irqreturn.h>
 #include <linux/workqueue.h>
 #include <linux/pm_qos.h>
+#include <linux/sched.h>
 
 #include "conninfra.h"
 #include "conn_power_throttling.h"

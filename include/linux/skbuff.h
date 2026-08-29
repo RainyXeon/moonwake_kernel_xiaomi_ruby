@@ -2393,6 +2393,11 @@ static inline bool skb_transport_header_was_set(const struct sk_buff *skb)
 	return skb->transport_header != (typeof(skb->transport_header))~0U;
 }
 
+static inline bool skb_network_header_was_set(const struct sk_buff *skb)
+{
+	return skb->network_header != (typeof(skb->network_header))~0U;
+}
+
 static inline unsigned char *skb_transport_header(const struct sk_buff *skb)
 {
 	return skb->head + skb->transport_header;
