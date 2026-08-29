@@ -20,8 +20,8 @@ CFLAGS_ln8000.o += -fno-strict-aliasing
 CFLAGS_ln8410.o += -fno-strict-aliasing
 
 # Disable stack tagging
-CFLAGS_ln8000.o += -fno-stack-clash-protection
-CFLAGS_ln8410.o += -fno-stack-clash-protection
+# CFLAGS_ln8000.o += -fno-stack-clash-protection
+# CFLAGS_ln8410.o += -fno-stack-clash-protection
 
 # Disable tree vectorize
 CFLAGS_ln8000.o += -fno-tree-vectorize
