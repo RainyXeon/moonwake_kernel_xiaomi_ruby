@@ -2205,8 +2205,7 @@ proc_map_files_readdir(struct file *file, struct dir_context *ctx)
 	struct task_struct *task;
 	struct mm_struct *mm;
 	unsigned long nr_files, pos, i;
-	struct flex_array *fa = NULL;
-	struct map_files_info info;
+	struct map_files_info *fa = NULL;
 	struct map_files_info *p;
 	int ret;
 #ifdef CONFIG_KSU_SUSFS_SUS_MAP
@@ -2254,18 +2253,14 @@ proc_map_files_readdir(struct file *file, struct dir_context *ctx)
 	}
 
 	if (nr_files) {
-		fa = flex_array_alloc(sizeof(info), nr_files,
-					GFP_KERNEL);
-		if (!fa || flex_array_prealloc(fa, 0, nr_files,
-						GFP_KERNEL)) {
+		fa = kvmalloc_array(nr_files, sizeof(*fa), GFP_KERNEL);
+		if (!fa) {
 			ret = -ENOMEM;
-			if (fa)
-				flex_array_free(fa);
 			mmap_read_unlock(mm);
 			mmput(mm);
 			goto out_put_task;
 		}
-		for (i = 0, vma = mm->mmap, pos = 2; vma;
+		for (i = 0, vma = mm->mmap, pos = 2; vma && i < nr_files;
 				vma = vma->vm_next) {
 			if (!vma->vm_file)
 				continue;
@@ -2277,12 +2272,12 @@ proc_map_files_readdir(struct file *file, struct dir_context *ctx)
 			if (++pos <= ctx->pos)
 				continue;
 
-			info.start = vma->vm_start;
-			info.end = vma->vm_end;
-			info.mode = vma->vm_file->f_mode;
-			if (flex_array_put(fa, i++, &info, GFP_KERNEL))
-				BUG();
+			fa[i].start = vma->vm_start;
+			fa[i].end = vma->vm_end;
+			fa[i].mode = vma->vm_file->f_mode;
+			i++;
 		}
+		nr_files = i;
 	}
 	mmap_read_unlock(mm);
 	mmput(mm);
@@ -2291,7 +2286,7 @@ proc_map_files_readdir(struct file *file, struct dir_context *ctx)
 		char buf[4 * sizeof(long) + 2];	/* max: %lx-%lx\0 */
 		unsigned int len;
 
-		p = flex_array_get(fa, i);
+		p = &fa[i];
 		len = snprintf(buf, sizeof(buf), "%lx-%lx", p->start, p->end);
 		if (!proc_fill_cache(file, ctx,
 				      buf, len,
@@ -2302,7 +2297,7 @@ proc_map_files_readdir(struct file *file, struct dir_context *ctx)
 		ctx->pos++;
 	}
 	if (fa)
-		flex_array_free(fa);
+		kvfree(fa);
 
 out_put_task:
 	put_task_struct(task);
