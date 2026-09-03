@@ -11,6 +11,7 @@
 # GNU General Public License for more details.
 #
 
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/cpufreq_v1/src
 ccflags-y += -DMET_USER_EVENT_SUPPORT
 
 ifeq ($(CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES),"mediatek/mt6885_3gear")
@@ -54,6 +55,7 @@ ccflags-y += \
 	-I$(srctree)/drivers/misc/mediatek/include \
 	-I$(srctree)/drivers/misc/mediatek/include/mt-plat/$(MTK_PLATFORM)/include	\
 	-I$(srctree)/drivers/misc/mediatek/base/power/$(MTK_PLATFORM) \
+	-I$(srctree)/drivers/misc/mediatek/base/power/cpufreq_v1/src \
 	-I$(srctree)/drivers/misc/mediatek/base/power/include      \
 	-I$(srctree)/drivers/misc/mediatek/mcupm/$(MTK_PLATFORM)/
 #sspm

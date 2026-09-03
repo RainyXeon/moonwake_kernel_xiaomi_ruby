@@ -237,4 +237,16 @@ struct ftrace_likely_data {
  */
 #define noinline_for_stack noinline
 
+#ifndef __nocfi
+#define __nocfi
+#endif
+
+#ifndef fallthrough
+# if __has_attribute(__fallthrough__)
+#  define fallthrough                    __attribute__((__fallthrough__))
+# else
+#  define fallthrough                    do {} while (0)  /* fallthrough */
+# endif
+#endif
+
 #endif /* __LINUX_COMPILER_TYPES_H */

@@ -26,6 +26,7 @@ else
 endif
 
 ccflags-y += \
+	-I$(srctree)/drivers/misc/mediatek/base/power/swpm_v1/mt6877/ \
 	-I$(srctree)/drivers/gpu/mediatek/gpufreq/include/ \
 	-I$(srctree)/drivers/gpu/mediatek/gpufreq/v1/include/$(PDIR)/	\
 	-I$(srctree)/drivers/misc/mediatek/include/mt-plat/	\

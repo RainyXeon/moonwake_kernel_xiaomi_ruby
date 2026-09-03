@@ -10,11 +10,16 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 #
+PPM_ROOT_DIR ?= $(srctree)/drivers/misc/mediatek/base/power/ppm_v3
 
 ccflags-y +=	\
 	-I$(PPM_ROOT_DIR)/inc \
-	-I$(srctree)/drivers/misc/mediatek/base/power/$(CONFIG_MTK_PLATFORM)/	\
-	-I$(srctree)/drivers/misc/mediatek/thermal/$(CONFIG_MTK_PLATFORM)/inc/  \
+	-I$(PPM_ROOT_DIR)/src/mach/mt6877 \
+	-I$(srctree)/drivers/misc/mediatek/include/mt-plat/mt6877/include \
+	-I$(srctree)/drivers/misc/mediatek/include/mt-plat \
+	-I$(srctree)/drivers/misc/mediatek/base/power/mt6877/ \
+	-I$(srctree)/drivers/misc/mediatek/thermal/mt6877/inc/ \
+	-I$(srctree)/drivers/gpu/mediatek/gpufreq/include/ \
 	-I$(srctree)/drivers/misc/mediatek/base/power/include
 
 # platform dependent functions

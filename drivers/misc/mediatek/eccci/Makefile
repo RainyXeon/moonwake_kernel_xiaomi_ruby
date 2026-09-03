@@ -48,6 +48,8 @@ $(info CONFIG_MTK_PLATFORM := $(CONFIG_MTK_PLATFORM))
 $(info MTK_PLATFORM := $(MTK_PLATFORM))
 
 
+subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/inc/
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/$(MTK_PLATFORM)
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/ccmni/

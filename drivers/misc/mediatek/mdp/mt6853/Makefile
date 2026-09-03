@@ -13,7 +13,16 @@
 
 # drivers/mdp
 
+MTK_PLATFORM := $(subst ",,$(CONFIG_MTK_PLATFORM))
+ifeq ($(CONFIG_MACH_MT6877),y)
+    MTK_PLATFORM := mt6877
+endif
+
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/mdp \
+             -I$(srctree)/drivers/misc/mediatek/mdp/mt6853 \
+             -I$(srctree)/drivers/misc/mediatek/include/mt-plat/$(MTK_PLATFORM)/include \
+             -I$(srctree)/drivers/misc/mediatek/include/mt-plat \
+             -I$(srctree)/drivers/misc/mediatek/include \
              -I$(srctree)/drivers/misc/mediatek/mmdvfs/ \
              -I$(srctree)/drivers/misc/mediatek/smi/ \
              -I$(srctree)/drivers/misc/mediatek/smi/$(MTK_PLATFORM)/ \

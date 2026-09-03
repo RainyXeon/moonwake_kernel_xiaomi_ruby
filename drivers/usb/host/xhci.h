@@ -1827,6 +1827,7 @@ struct xhci_hcd {
 
 	/* Host controller watchdog timer structures */
 	unsigned int		xhc_state;
+	unsigned long		run_graceperiod;
 
 	u32			command;
 	struct s3_save		s3;

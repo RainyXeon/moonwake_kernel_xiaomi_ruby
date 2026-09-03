@@ -23,6 +23,7 @@ subdir-ccflags-$(CONFIG_MTK_PMIC_CHIP_MT6356) += -I$(srctree)/drivers/misc/media
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/pmic/include
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc
 subdir-ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/misc/
+subdir-ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/charger
 subdir-ccflags-y += -I$(srctree)/drivers/power/supply/mediatek/battery/
 
 obj-y += step_jeita_charge.o charger_class.o mtk_charger.o mtk_switch_charging.o mtk_pdc_intf.o\
