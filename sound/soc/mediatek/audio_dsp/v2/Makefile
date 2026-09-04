@@ -26,6 +26,7 @@ endif
 # adsp include path
 ifeq ($(CONFIG_SND_SOC_MTK_AUDIO_DSP),y)
 subdir-ccflags-y += -I$(srctree)/sound/soc/mediatek/audio_dsp/$(MTK_PLATFORM)
+subdir-ccflags-y += -I$(srctree)/sound/soc/mediatek/audio_dsp/v2
 ifeq ($(CONFIG_MACH_MT6779),y)
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/audio_ipi/common_v1/framework
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/audio_ipi/common_v1/tasks/audplayback/

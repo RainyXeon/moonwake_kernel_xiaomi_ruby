@@ -71,6 +71,7 @@ ccflags-y += \
 	-I$(srctree)/drivers/devfreq/helio-dvfsrc-v3/ \
 	-I$(srctree)/drivers/misc/mediatek/base/power/$(CONFIG_MTK_PLATFORM) \
 	-I$(srctree)/drivers/misc/mediatek/base/power/cm_mgr_v1/ \
+	-I$(srctree)/drivers/misc/mediatek/base/power/cm_mgr_v1/$(PLATFORM_DIR) \
 	-I$(srctree)/drivers/misc/mediatek/base/power/cpufreq_v1/inc \
 	-I$(srctree)/drivers/misc/mediatek/base/power/cpufreq_v1/src/mach/$(PLATFORM_DIR)/  \
 	-I$(srctree)/drivers/misc/mediatek/base/power/include \

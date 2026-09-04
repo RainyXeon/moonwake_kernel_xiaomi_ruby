@@ -11,6 +11,7 @@
 # GNU General Public License for more details.
 #
 
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/cameraisp/src/mt6853
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/mmp/
 ccflags-y += -I$(srctree)/drivers/staging/android/mtk_ion/
 ccflags-y  += -I$(srctree)/drivers/staging/android/mtk_ion/mtk/
@@ -21,6 +22,10 @@ ccflags-y += -I$(srctree)/include/dt-bindings/memory/
 ccflags-y += -I$(srctree)/drivers/iommu/
 ccflags-y += -I$(srctree)/drivers/clk/mediatek/
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/imgsensor/inc/
+MTK_PLATFORM := $(subst ",,$(CONFIG_MTK_PLATFORM))
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat/$(MTK_PLATFORM)/include/
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat/
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/
 
 obj-y += camera_isp.o
 obj-y += cam_qos.o

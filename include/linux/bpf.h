@@ -23,7 +23,6 @@
 #include <linux/module.h>
 #include <linux/kallsyms.h>
 #include <linux/capability.h>
-#include <linux/percpu-refcount.h>
 
 struct bpf_verifier_env;
 struct bpf_verifier_log;
@@ -562,8 +561,7 @@ struct bpf_tramp_progs {
  *      fentry = a set of program to run before calling original function
  *      fexit = a set of program to run after original function
  */
-struct bpf_tramp_image;
-int arch_prepare_bpf_trampoline(struct bpf_tramp_image *tr, void *image, void *image_end,
+int arch_prepare_bpf_trampoline(void *image, void *image_end,
 				const struct btf_func_model *m, u32 flags,
 				struct bpf_tramp_progs *tprogs,
 				void *orig_call);
@@ -572,8 +570,6 @@ u64 notrace __bpf_prog_enter(void);
 void notrace __bpf_prog_exit(struct bpf_prog *prog, u64 start);
 void notrace __bpf_prog_enter_sleepable(void);
 void notrace __bpf_prog_exit_sleepable(void);
-void notrace __bpf_tramp_enter(struct bpf_tramp_image *tr);
-void notrace __bpf_tramp_exit(struct bpf_tramp_image *tr);
 
 struct bpf_ksym {
 	unsigned long		 start;
@@ -590,18 +586,6 @@ enum bpf_tramp_prog_type {
 	BPF_TRAMP_MODIFY_RETURN,
 	BPF_TRAMP_MAX,
 	BPF_TRAMP_REPLACE, /* more than MAX */
-};
-
-struct bpf_tramp_image {
-	void *image;
-	struct bpf_ksym ksym;
-	struct percpu_ref pcref;
-	void *ip_after_call;
-	void *ip_epilogue;
-	union {
-		struct rcu_head rcu;
-		struct work_struct work;
-	};
 };
 
 struct bpf_trampoline {
@@ -626,8 +610,9 @@ struct bpf_trampoline {
 	/* Number of attached programs. A counter per kind. */
 	int progs_cnt[BPF_TRAMP_MAX];
 	/* Executable image of trampoline */
-	struct bpf_tramp_image *cur_image;
+	void *image;
 	u64 selector;
+	struct bpf_ksym ksym;
 };
 
 struct bpf_attach_target_info {
@@ -712,8 +697,6 @@ void bpf_image_ksym_add(void *data, struct bpf_ksym *ksym);
 void bpf_image_ksym_del(struct bpf_ksym *ksym);
 void bpf_ksym_add(struct bpf_ksym *ksym);
 void bpf_ksym_del(struct bpf_ksym *ksym);
-int bpf_jit_charge_modmem(u32 pages);
-void bpf_jit_uncharge_modmem(u32 pages);
 #else
 static inline int bpf_trampoline_link_prog(struct bpf_prog *prog,
 					   struct bpf_trampoline *tr)
@@ -804,6 +787,7 @@ struct bpf_prog_aux {
 	bool func_proto_unreliable;
 	bool sleepable;
 	bool tail_call_reachable;
+	enum bpf_tramp_prog_type trampoline_prog_type;
 	struct hlist_node tramp_hlist;
 	/* BTF_KIND_FUNC_PROTO for valid attach_btf_id */
 	const struct btf_type *attach_func_proto;
@@ -1087,7 +1071,6 @@ int bpf_prog_array_copy(struct bpf_prog_array *old_array,
 
 #define __BPF_PROG_RUN_ARRAY(array, ctx, func, check_non_null, set_cg_storage) \
 	({						\
-		__label__ _out;				\
 		struct bpf_prog_array_item *_item;	\
 		struct bpf_prog *_prog;			\
 		struct bpf_prog_array *_array;		\
@@ -1095,7 +1078,7 @@ int bpf_prog_array_copy(struct bpf_prog_array *old_array,
 		migrate_disable();			\
 		rcu_read_lock();			\
 		_array = rcu_dereference(array);	\
-		if (unlikely(!_array))			\
+		if (unlikely(check_non_null && !_array))\
 			goto _out;			\
 		_item = &_array->items[0];		\
 		while ((_prog = READ_ONCE(_item->prog))) {		\

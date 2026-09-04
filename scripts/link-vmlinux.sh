@@ -316,7 +316,6 @@ if [ -n "${CONFIG_LTO_CLANG}" ]; then
 	# Call recordmcount if needed
 	recordmcount vmlinux.o
 fi
-
 btf_vmlinux_bin_o=""
 if [ -n "${CONFIG_DEBUG_INFO_BTF}" ]; then
 	if gen_btf .tmp_vmlinux.btf .btf.vmlinux.bin.o ; then
@@ -379,9 +378,9 @@ info LD vmlinux
 vmlinux_link vmlinux "${kallsymso}" "${btf_vmlinux_bin_o}"
 
 # fill in BTF IDs
-if [ -n "${CONFIG_DEBUG_INFO_BTF}" ]; then
-info BTFIDS vmlinux
-${RESOLVE_BTFIDS} vmlinux
+if [ -n "${CONFIG_DEBUG_INFO_BTF}" ] && [ -n "${btf_vmlinux_bin_o}" ] && [ -x "${RESOLVE_BTFIDS}" ]; then
+	info BTFIDS vmlinux
+	${RESOLVE_BTFIDS} vmlinux
 fi
 
 if [ -n "${CONFIG_BUILDTIME_EXTABLE_SORT}" ]; then

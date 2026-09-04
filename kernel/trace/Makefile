@@ -32,6 +32,7 @@ CFLAGS_bpf_trace.o := -I$(src)
 
 CFLAGS_trace_benchmark.o := -I$(src)
 CFLAGS_trace_events_filter.o := -I$(src)
+CFLAGS_mtk_trace.o := -I$(src)
 
 obj-$(CONFIG_TRACE_CLOCK) += trace_clock.o
 

@@ -15,6 +15,7 @@ ifneq ($(CONFIG_MTK_TINYSYS_SCP_SUPPORT),)
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/scp/include
 endif
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/vow
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/vow/ver02
 
 mtk-vow-objs := \
 	vow.o \

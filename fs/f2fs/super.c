@@ -3769,6 +3769,7 @@ try_onemore:
 				f2fs_err(sbi,
 					"Need to recover fsync data");
 				err = -EINVAL;
+				f2fs_err(sbi, "Need to recover fsync data");
 				goto free_meta;
 			} else {
 				f2fs_info(sbi,

@@ -58,12 +58,12 @@ ccflags-y += -I$(obj)/../../midware/1.1/
 # GKI : MDLA only
 # ------------------------------------------------------------------------------
 
-src=$(srctree)/drivers/misc/mediatek/apusys/mdla
-ccflags-y += -I$(src)/new_arch
+mdla-dir := $(srctree)/drivers/misc/mediatek/apusys/mdla/new_arch
+ccflags-y += -I$(mdla-dir)
 
 obj-y += mdla.o
 
-mdla-objs += $(shell cd $(src) && find new_arch -name "*.c" | sed 's/\.c/\.o/g')
+mdla-objs += $(shell cd $(mdla-dir) && find * -name "*.c" | sed 's/\.c/\.o/g')
 
 
 

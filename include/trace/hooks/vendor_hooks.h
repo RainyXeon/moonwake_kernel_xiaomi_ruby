@@ -9,6 +9,8 @@
 
 #include <linux/tracepoint.h>
 
+#if defined(CONFIG_TRACEPOINTS) && defined(CONFIG_ANDROID_VENDOR_HOOKS)
+
 #define DECLARE_HOOK DECLARE_TRACE
 
 #ifdef TRACE_HEADER_MULTI_READ
@@ -74,3 +76,29 @@
 			PARAMS(__data, args))
 
 #endif /* TRACE_HEADER_MULTI_READ */
+
+#else /* !CONFIG_TRACEPOINTS || !CONFIG_ANDROID_VENDOR_HOOKS */
+
+#ifndef DECLARE_EVENT_NOP
+#define DECLARE_EVENT_NOP(name, proto, args)				\
+	static inline void trace_##name(proto)				\
+	{ }								\
+	static inline bool trace_##name##_enabled(void)			\
+	{								\
+		return false;						\
+	}								\
+	static inline int						\
+	register_trace_##name(void (*probe)(void *__data, proto), void *data) \
+	{								\
+		return -ENOSYS;						\
+	}
+#endif
+
+#define DECLARE_HOOK(name, proto, args)					\
+	DECLARE_EVENT_NOP(name, PARAMS(proto), PARAMS(args))
+
+#undef DECLARE_RESTRICTED_HOOK
+#define DECLARE_RESTRICTED_HOOK(name, proto, args, cond)		\
+	DECLARE_EVENT_NOP(name, PARAMS(proto), PARAMS(args))
+
+#endif /* CONFIG_TRACEPOINTS && CONFIG_ANDROID_VENDOR_HOOKS */

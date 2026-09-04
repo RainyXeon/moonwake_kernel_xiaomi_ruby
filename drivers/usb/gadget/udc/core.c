@@ -1609,6 +1609,7 @@ void usb_del_gadget(struct usb_gadget *gadget)
 	mutex_unlock(&udc_lock);
 
 	kobject_uevent(&udc->dev.kobj, KOBJ_REMOVE);
+	sysfs_remove_link(&udc->dev.kobj, "gadget");
 	/*
 	 * Set the teardown flag before flushing the work to prevent new work
 	 * from being scheduled while we are cleaning up.
