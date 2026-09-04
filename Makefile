@@ -303,7 +303,7 @@ include $(srctree)/scripts/Kbuild.include
 
 # Read KERNELRELEASE from include/config/kernel.release (if it exists)
 KERNELRELEASE = $(shell cat include/config/kernel.release 2> /dev/null)
-KERNELVERSION = 6$(if 6,.6$(if 142,.142))
+KERNELVERSION = 6$(if 6,.6$(if 148,.148))
 export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION
 
 include $(srctree)/scripts/subarch.include
